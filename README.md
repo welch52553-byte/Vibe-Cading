@@ -1,5 +1,7 @@
 # VIBE-CADING
 
+# ⚠ This project is under active development. Functionality is not guaranteed.
+
 > Point. Label. Vibe with AI.
 
 OpenSCAD is powerful but describing geometry to an AI is hard.
@@ -129,3 +131,19 @@ Vibe-Cading/
 3. The AI uses annotation IDs (`face_001`, `edge_a`) as geometric references in all code changes
 4. After modifying SCAD geometry, the AI automatically updates the JSON — fixing recoverable annotations and flagging others as invalid
 5. Invalid annotations appear with a **⚠ warning** in the viewer — delete and re-annotate as needed
+
+---
+
+## Acknowledgements
+
+**Reference Projects**
+
+- [CADAM (Adam-CAD/CADAM)](https://github.com/Adam-CAD/CADAM) — React + Three.js rendering pipeline and Claude API architecture
+- [FluidCAD (Fluid-CAD/FluidCAD)](https://github.com/Fluid-CAD/FluidCAD) — face/edge query and filter API design
+- [Pointer-CAD (CVPR 2026)](https://arxiv.org/abs/2506.01012) — research confirming that face/edge selection is the core challenge in LLM-assisted CAD workflows
+
+**Frameworks & Tools**
+
+- [Three.js](https://threejs.org/) — 3D rendering and interaction in the browser
+- [OpenSCAD](https://openscad.org/) — open-source parametric CAD modeler
+- [Python](https://www.python.org/) — local HTTP server
