@@ -1,0 +1,133 @@
+{
+  "version": "1.0",
+  "scad_file": "example.scad",
+  "stl_file": "example.stl",
+  "generated_at": "2026-05-13T05:48:36",
+  "coordinate_system": "OpenSCAD (Z-up, mm)",
+  "faces": [
+    {
+      "id": "face_001",
+      "label": "顶面 (TOP)",
+      "normal": [
+        0,
+        0,
+        1
+      ],
+      "click_point": [
+        11.46,
+        11.23,
+        10
+      ],
+      "area_mm2": 4801.2,
+      "semantic": "TOP",
+      "semantic_confidence": 1,
+      "notes": ""
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_a",
+      "label": "c",
+      "start": [
+        40,
+        -30,
+        10
+      ],
+      "end": [
+        -40,
+        -30,
+        10
+      ],
+      "midpoint": [
+        0,
+        -30,
+        10
+      ],
+      "direction": [
+        -1,
+        0,
+        0
+      ],
+      "length_mm": 80,
+      "notes": ""
+    },
+    {
+      "id": "edge_b",
+      "label": "b",
+      "start": [
+        40,
+        -30,
+        10
+      ],
+      "end": [
+        40,
+        30,
+        10
+      ],
+      "midpoint": [
+        40,
+        0,
+        10
+      ],
+      "direction": [
+        0,
+        1,
+        0
+      ],
+      "length_mm": 60,
+      "notes": ""
+    },
+    {
+      "id": "edge_c",
+      "label": "c",
+      "start": [
+        -40,
+        -30,
+        10
+      ],
+      "end": [
+        -40,
+        30,
+        10
+      ],
+      "midpoint": [
+        -40,
+        0,
+        10
+      ],
+      "direction": [
+        0,
+        1,
+        0
+      ],
+      "length_mm": 60,
+      "notes": ""
+    },
+    {
+      "id": "edge_d",
+      "label": "d",
+      "start": [
+        -40,
+        30,
+        10
+      ],
+      "end": [
+        40,
+        30,
+        10
+      ],
+      "midpoint": [
+        0,
+        30,
+        10
+      ],
+      "direction": [
+        1,
+        0,
+        0
+      ],
+      "length_mm": 80,
+      "notes": ""
+    }
+  ]
+}

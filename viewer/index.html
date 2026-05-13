@@ -1,0 +1,1264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SCAD 几何标注工具</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  #header { background: #16213e; padding: 10px 20px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #0f3460; flex-shrink: 0; }
+  #header h1 { font-size: 16px; font-weight: 600; color: #e94560; }
+  #load-btn { background: #0f3460; color: #e0e0e0; border: 1px solid #e94560; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  #load-btn:hover { background: #e94560; }
+  #file-input { display: none; }
+  #status { font-size: 12px; color: #888; margin-left: auto; }
+  #toggle-scad { background: #0f3460; color: #888; border: 1px solid #2a3a50; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  #toggle-scad:hover { color: #e0e0e0; border-color: #4fc3f7; }
+  #watch-btn { background: #0f3460; color: #e0e0e0; border: 1px solid #55dd55; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  #watch-btn:hover { background: #55dd55; color: #0d0d1a; }
+  #watch-btn.watching { background: #55dd55; color: #0d0d1a; font-weight: 600; }
+  #watch-indicator { display: none; align-items: center; gap: 6px; font-size: 12px; color: #55dd55; }
+  #watch-indicator.active { display: flex; }
+  #watch-dot { width: 7px; height: 7px; border-radius: 50%; background: #55dd55; animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  #main { display: flex; flex: 1; overflow: hidden; }
+
+  /* SCAD 预览面板 */
+  #scad-panel { width: 270px; background: #12192e; border-right: 1px solid #0f3460; display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; transition: width 0.2s; }
+  #scad-panel.collapsed { width: 0; border-right: none; }
+  #scad-header { padding: 10px 12px 8px; border-bottom: 1px solid #0f3460; flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
+  #scad-header h3 { font-size: 12px; color: #e94560; text-transform: uppercase; letter-spacing: 0.5px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #scad-mtime { font-size: 10px; color: #555; white-space: nowrap; }
+  #scad-code { flex: 1; overflow: auto; margin: 0; padding: 10px 12px; font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 11.5px; line-height: 1.6; color: #a8b8cc; background: transparent; white-space: pre; counter-reset: line; }
+  #scad-code .ln { display: block; }
+  #scad-code .ln::before { content: counter(line); counter-increment: line; display: inline-block; width: 24px; color: #2a3a50; text-align: right; margin-right: 10px; user-select: none; font-size: 10px; }
+  /* SCAD 基础语法颜色 */
+  #scad-code .kw { color: #4fc3f7; }
+  #scad-code .cm { color: #4a5a6a; font-style: italic; }
+  #scad-code .nm { color: #c5e1a5; }
+  #scad-code .st { color: #ffcc80; }
+
+  #canvas-wrapper { flex: 1; position: relative; background: #0d0d1a; }
+  #canvas-wrapper.drag-over { outline: 2px dashed #e94560; }
+  #drop-hint { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); text-align: center; color: #444; pointer-events: none; }
+  #drop-hint .icon { font-size: 48px; margin-bottom: 12px; }
+  #drop-hint p { font-size: 14px; }
+  canvas { display: block; max-width: 100%; max-height: 100%; }
+
+  #sidebar { width: 300px; background: #16213e; border-left: 1px solid #0f3460; display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }
+
+  #face-info { padding: 14px; border-bottom: 1px solid #0f3460; }
+  #face-info h3 { font-size: 13px; color: #e94560; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .info-row { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px; }
+  .info-label { color: #888; }
+  .info-value { color: #ccc; font-family: monospace; }
+  .semantic-badge { display: inline-block; background: #0f3460; color: #4fc3f7; padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: 600; }
+  #no-selection { color: #555; font-size: 13px; text-align: center; padding: 20px 0; }
+
+  #annotation-form { padding: 14px; border-bottom: 1px solid #0f3460; }
+  #annotation-form h3 { font-size: 13px; color: #e94560; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; margin-top: 10px; }
+  label:first-of-type { margin-top: 0; }
+  input[type="text"], textarea { width: 100%; background: #0d0d1a; border: 1px solid #0f3460; color: #e0e0e0; padding: 6px 8px; border-radius: 4px; font-size: 13px; font-family: inherit; }
+  textarea { height: 60px; resize: vertical; }
+  input[type="text"]:focus, textarea:focus { outline: none; border-color: #e94560; }
+  #add-btn { width: 100%; margin-top: 10px; background: #e94560; color: white; border: none; padding: 8px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; }
+  #add-btn:hover { background: #c73652; }
+  #add-btn:disabled { background: #444; color: #666; cursor: not-allowed; }
+
+  #annotations-list { flex: 1; overflow-y: auto; padding: 14px; }
+  #annotations-list h3 { font-size: 13px; color: #e94560; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .annotation-card { background: #0d0d1a; border: 1px solid #0f3460; border-radius: 6px; padding: 10px; margin-bottom: 8px; position: relative; }
+  .annotation-card:hover { border-color: #e94560; }
+  .annotation-id { font-size: 11px; color: #e94560; font-family: monospace; font-weight: 600; }
+  .annotation-label { font-size: 13px; color: #e0e0e0; margin: 4px 0 2px; }
+  .annotation-notes { font-size: 11px; color: #888; }
+  .annotation-meta { font-size: 10px; color: #555; font-family: monospace; margin-top: 4px; }
+  .delete-btn { position: absolute; top: 8px; right: 8px; background: none; border: none; color: #555; cursor: pointer; font-size: 14px; line-height: 1; }
+  .delete-btn:hover { color: #e94560; }
+  #empty-list { color: #555; font-size: 12px; text-align: center; padding: 16px 0; }
+
+  #export-bar { padding: 12px 14px; border-top: 1px solid #0f3460; display: flex; gap: 8px; flex-shrink: 0; }
+  #export-bar button { flex: 1; background: #0f3460; color: #e0e0e0; border: 1px solid #4fc3f7; padding: 7px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  #export-bar button:hover { background: #4fc3f7; color: #0d0d1a; font-weight: 600; }
+  #export-bar button:disabled { background: #1a1a2e; border-color: #333; color: #444; cursor: not-allowed; }
+
+  /* CSS2DRenderer 容器及其所有子元素不得拦截任何鼠标/拖拽事件 */
+  #canvas-wrapper > div, #canvas-wrapper > div * { pointer-events: none !important; }
+
+  /* 3D 面标注标签 */
+  .face-label {
+    background: rgba(13, 13, 26, 0.82);
+    border: 1px solid #e94560;
+    border-radius: 4px;
+    padding: 3px 8px 3px 6px;
+    font-size: 11px;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    color: #e0e0e0;
+    white-space: nowrap;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    line-height: 1.5;
+  }
+  .face-label-id {
+    font-family: monospace;
+    font-weight: 700;
+    color: #e94560;
+    font-size: 10px;
+  }
+  .face-label-text { color: #ccc; }
+
+  /* 边缘标注标签（橙色边框区别于面标注） */
+  .edge-label { background: rgba(13,13,26,0.82); border: 1px solid #ff8a65; border-radius: 4px; padding: 3px 8px 3px 6px; font-size: 11px; font-family: 'Segoe UI', system-ui, sans-serif; color: #e0e0e0; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.6); display: flex; align-items: center; gap: 5px; line-height: 1.5; }
+  .edge-label-id { font-family: monospace; font-weight: 700; color: #ff8a65; font-size: 10px; }
+
+  /* 标注卡片类型徽章 */
+  .ann-type { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-right: 4px; vertical-align: middle; }
+  .ann-type.face { background: #1a3060; color: #4fc3f7; }
+  .ann-type.edge { background: #3a1a10; color: #ff8a65; }
+  .annotation-card.edge-card { border-color: #3a2a1a; }
+  .annotation-card.edge-card:hover { border-color: #ff8a65; }
+
+  /* STL 选择 Modal */
+  #stl-picker-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 999; align-items: center; justify-content: center; }
+  #stl-picker-box { background: #16213e; border: 1px solid #e94560; border-radius: 8px; padding: 24px 28px; min-width: 280px; max-width: 420px; }
+  #stl-picker-box h3 { font-size: 14px; color: #e94560; margin-bottom: 6px; }
+  #stl-picker-box p { font-size: 12px; color: #888; margin-bottom: 16px; }
+  #stl-picker-list { display: flex; flex-direction: column; gap: 8px; }
+  .stl-pick-btn { background: #0f3460; color: #e0e0e0; border: 1px solid #4fc3f7; padding: 9px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; text-align: left; font-family: monospace; }
+  .stl-pick-btn:hover { background: #4fc3f7; color: #0d0d1a; font-weight: 600; }
+  #stl-picker-cancel { margin-top: 14px; width: 100%; background: none; border: 1px solid #444; color: #888; padding: 7px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  #stl-picker-cancel:hover { border-color: #e94560; color: #e94560; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>SCAD 几何标注工具</h1>
+  <button id="toggle-scad" title="显示/隐藏 SCAD 预览">SCAD</button>
+  <button id="load-btn" onclick="document.getElementById('file-input').click()">加载 STL</button>
+  <input type="file" id="file-input" accept=".stl">
+  <button id="watch-btn" title="选择 STL 文件并自动监视变化，模型更新时保留标注">监视 STL</button>
+  <div id="watch-indicator"><div id="watch-dot"></div><span id="watch-label">监视中</span></div>
+  <span id="status">拖拽 STL 文件到左侧区域，或点击"加载 STL"</span>
+</div>
+
+<div id="main">
+  <div id="scad-panel">
+    <div id="scad-header">
+      <h3 id="scad-filename">SCAD 预览</h3>
+      <span id="scad-mtime">—</span>
+    </div>
+    <pre id="scad-code"><span style="color:#555">启动监视后自动加载…</span></pre>
+  </div>
+  <div id="canvas-wrapper">
+    <div id="drop-hint">
+      <div class="icon">📦</div>
+      <p>拖拽 STL 文件到此处</p>
+      <p style="margin-top:6px;font-size:12px;">或点击上方"加载 STL"按钮</p>
+    </div>
+  </div>
+
+  <div id="sidebar">
+    <div id="face-info">
+      <h3 id="selection-title">选中元素</h3>
+      <div id="no-selection">点击模型的面或边以查看属性</div>
+      <!-- 面属性 -->
+      <div id="face-props" style="display:none">
+        <div class="info-row"><span class="info-label">法线</span><span class="info-value" id="prop-normal">—</span></div>
+        <div class="info-row"><span class="info-label">点击坐标</span><span class="info-value" id="prop-point">—</span></div>
+        <div class="info-row"><span class="info-label">面积估算</span><span class="info-value" id="prop-area">—</span></div>
+        <div class="info-row"><span class="info-label">语义方向</span><span class="info-value"><span id="prop-semantic" class="semantic-badge">—</span></span></div>
+        <div class="info-row"><span class="info-label">置信度</span><span class="info-value" id="prop-confidence">—</span></div>
+      </div>
+      <!-- 边属性 -->
+      <div id="edge-props" style="display:none">
+        <div class="info-row"><span class="info-label">长度</span><span class="info-value" id="prop-edge-len">—</span></div>
+        <div class="info-row"><span class="info-label">起点</span><span class="info-value" id="prop-edge-start">—</span></div>
+        <div class="info-row"><span class="info-label">终点</span><span class="info-value" id="prop-edge-end">—</span></div>
+        <div class="info-row"><span class="info-label">方向</span><span class="info-value" id="prop-edge-dir">—</span></div>
+      </div>
+    </div>
+
+    <div id="annotation-form">
+      <h3>添加标注</h3>
+      <label>标签（Label）</label>
+      <input type="text" id="input-label" list="label-presets" placeholder="输入或从下拉选择…" autocomplete="off">
+      <!-- 边缘标注 datalist：小写字母 -->
+      <datalist id="edge-label-presets">
+        <option value="a"><option value="b"><option value="c"><option value="d">
+        <option value="e"><option value="f"><option value="g"><option value="h">
+        <option value="i"><option value="j"><option value="k"><option value="l">
+      </datalist>
+      <datalist id="label-presets">
+        <option value="顶面 (TOP)">
+        <option value="底面 (BOTTOM)">
+        <option value="前面 (FRONT)">
+        <option value="后面 (BACK)">
+        <option value="左侧面 (LEFT)">
+        <option value="右侧面 (RIGHT)">
+        <option value="内壁 (INSIDE)">
+        <option value="圆柱面 (CYLINDER)">
+        <option value="斜面 (OBLIQUE)">
+        <option value="倒角面 (CHAMFER)">
+        <option value="圆角面 (FILLET)">
+        <option value="安装基准面 (MOUNT)">
+        <option value="开孔平面 (OPENING)">
+        <option value="螺丝柱顶面">
+        <option value="USB接口面">
+        <option value="走线槽底面">
+      </datalist>
+      <label>备注（Notes）</label>
+      <textarea id="input-notes" placeholder="如：需要在此面打螺丝孔"></textarea>
+      <button id="add-btn" disabled>添加标注</button>
+    </div>
+
+    <div id="annotations-list">
+      <h3>已添加标注</h3>
+      <div id="empty-list">暂无标注</div>
+    </div>
+
+    <div id="export-bar">
+      <button id="btn-save" disabled title="直接写入本地文件（需先选择保存路径）">保存 JSON</button>
+      <button id="btn-download" disabled>下载</button>
+      <button id="btn-copy" disabled>复制</button>
+    </div>
+  </div>
+</div>
+
+<!-- Plain script: runs immediately, not deferred like modules.
+     Captures the File object before dataTransfer is cleared, then
+     relays it to the module via a CustomEvent. -->
+<script>
+window.addEventListener('dragover', e => {
+  e.preventDefault();
+  document.getElementById('canvas-wrapper')?.classList.add('drag-over');
+}, false);
+window.addEventListener('dragleave', e => {
+  if (e.relatedTarget === null)
+    document.getElementById('canvas-wrapper')?.classList.remove('drag-over');
+}, false);
+window.addEventListener('drop', e => {
+  e.preventDefault();
+  document.getElementById('canvas-wrapper')?.classList.remove('drag-over');
+  const file = e.dataTransfer?.files[0];
+  if (file && file.name.toLowerCase().endsWith('.stl')) {
+    window.dispatchEvent(new CustomEvent('stl-file-dropped', { detail: { file } }));
+  }
+}, false);
+</script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.158.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.158.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+// ─── Scene Setup ───────────────────────────────────────────────────────────
+const wrapper = document.getElementById('canvas-wrapper');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.shadowMap.enabled = true;
+wrapper.appendChild(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.domElement.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;';
+wrapper.appendChild(labelRenderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d0d1a);
+
+// Z-up camera: position camera so Z-up model looks natural
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 10000);
+camera.position.set(0, -200, 150);
+camera.up.set(0, 0, 1);  // Z is up
+camera.lookAt(0, 0, 0);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.zoomSpeed = 1.2;
+
+// Lighting
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
+dirLight1.position.set(1, -1, 2);
+scene.add(dirLight1);
+const dirLight2 = new THREE.DirectionalLight(0x4080ff, 0.3);
+dirLight2.position.set(-1, 1, -1);
+scene.add(dirLight2);
+
+// Axes helper (X=red, Y=green, Z=blue)
+scene.add(new THREE.AxesHelper(50));
+
+// Grid on XY plane
+const grid = new THREE.GridHelper(200, 20, 0x222244, 0x1a1a3a);
+grid.rotation.x = Math.PI / 2;  // rotate so grid is on XY plane (Z-up)
+scene.add(grid);
+
+function resize() {
+  const w = wrapper.clientWidth, h = wrapper.clientHeight;
+  renderer.setSize(w, h);
+  labelRenderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+resize();
+new ResizeObserver(resize).observe(wrapper);
+
+// ─── Axis Gizmo (bottom-left overlay) ─────────────────────────────────────
+const GIZMO_SIZE = 130;
+const gizmoCanvas = document.createElement('canvas');
+gizmoCanvas.width = GIZMO_SIZE;
+gizmoCanvas.height = GIZMO_SIZE;
+Object.assign(gizmoCanvas.style, {
+  position: 'absolute', bottom: '16px', left: '16px',
+  pointerEvents: 'none', borderRadius: '50%',
+});
+wrapper.appendChild(gizmoCanvas);
+const gCtx = gizmoCanvas.getContext('2d');
+
+// World axes: vec, color, positive label, negative label
+const GIZMO_AXES = [
+  { vec: new THREE.Vector3(1, 0, 0),  color: '#ff5555', pos: '+X 右', neg: '-X 左' },
+  { vec: new THREE.Vector3(0, 1, 0),  color: '#55dd55', pos: '+Y 前', neg: '-Y 后' },
+  { vec: new THREE.Vector3(0, 0, 1),  color: '#4499ff', pos: '+Z 上', neg: '-Z 下' },
+];
+
+function drawGizmo() {
+  const cx = GIZMO_SIZE / 2, cy = GIZMO_SIZE / 2, len = 44;
+  gCtx.clearRect(0, 0, GIZMO_SIZE, GIZMO_SIZE);
+
+  // Background circle
+  gCtx.fillStyle = 'rgba(13, 13, 26, 0.72)';
+  gCtx.beginPath();
+  gCtx.arc(cx, cy, 62, 0, Math.PI * 2);
+  gCtx.fill();
+
+  // Extract camera right/up/forward from world matrix
+  const right = new THREE.Vector3(), up = new THREE.Vector3(), fwd = new THREE.Vector3();
+  camera.matrixWorld.extractBasis(right, up, fwd);
+
+  // Project each axis end into 2D screen space (right=+x, up=+y)
+  const lines = [];
+  for (const ax of GIZMO_AXES) {
+    const sx =  ax.vec.dot(right) * len;
+    const sy = -ax.vec.dot(up)    * len;   // canvas Y is flipped
+    const sz =  ax.vec.dot(fwd);            // depth: negative = toward camera
+    lines.push({ sx,  sy,  sz,  color: ax.color, label: ax.pos,  isNeg: false });
+    lines.push({ sx: -sx, sy: -sy, sz: -sz, color: ax.color, label: ax.neg, isNeg: true  });
+  }
+  // Draw back-facing (larger sz = further) lines first
+  lines.sort((a, b) => b.sz - a.sz);
+
+  for (const ln of lines) {
+    const alpha = ln.isNeg ? 0.28 : 1.0;
+    const lw    = ln.isNeg ? 1.5  : 2.5;
+    gCtx.globalAlpha = alpha;
+
+    // Shaft
+    gCtx.beginPath();
+    gCtx.moveTo(cx, cy);
+    gCtx.lineTo(cx + ln.sx, cy + ln.sy);
+    gCtx.strokeStyle = ln.color;
+    gCtx.lineWidth = lw;
+    gCtx.stroke();
+
+    // Arrowhead (positive axes only)
+    if (!ln.isNeg) {
+      const angle = Math.atan2(ln.sy, ln.sx);
+      const tip = { x: cx + ln.sx, y: cy + ln.sy };
+      gCtx.beginPath();
+      gCtx.moveTo(tip.x, tip.y);
+      gCtx.lineTo(tip.x - 8 * Math.cos(angle - 0.4), tip.y - 8 * Math.sin(angle - 0.4));
+      gCtx.lineTo(tip.x - 8 * Math.cos(angle + 0.4), tip.y - 8 * Math.sin(angle + 0.4));
+      gCtx.closePath();
+      gCtx.fillStyle = ln.color;
+      gCtx.fill();
+    }
+
+    // Label
+    gCtx.font = ln.isNeg ? '10px monospace' : 'bold 11px monospace';
+    gCtx.fillStyle = ln.color;
+    gCtx.textAlign = ln.sx > 5 ? 'left' : ln.sx < -5 ? 'right' : 'center';
+    gCtx.textBaseline = ln.sy > 5 ? 'top' : ln.sy < -5 ? 'bottom' : 'middle';
+    const labelX = cx + ln.sx * 1.28;
+    const labelY = cy + ln.sy * 1.28;
+    gCtx.fillText(ln.label, labelX, labelY);
+  }
+  gCtx.globalAlpha = 1;
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+  updateLabelVisibility();
+  drawGizmo();
+}
+
+// ─── State ─────────────────────────────────────────────────────────────────
+let modelMesh = null;
+let highlightMesh = null;
+let selectedFaceData = null;
+let selectedEdgeData = null;
+let selectedType = 'none';  // 'face' | 'edge' | 'none'
+let annotations = [];
+let annotationEdges = [];
+let faceCounter = 0;
+let edgeCounter = 0;
+const labelObjects       = new Map();  // face ann.id → CSS2DObject
+const annotationMeshes   = new Map();  // face ann.id → THREE.Mesh
+const edgeLabelObjects   = new Map();  // edge ann.id → CSS2DObject
+const annotatedEdgeLines = new Map();  // edge ann.id → THREE.LineSegments
+let edgeLines = null;      // model edge display lines
+let edgeHighlight = null;  // current edge selection (yellow)
+let edgePickThreshold = 1.0;
+
+function nextEdgeLetter(n) {
+  const abc = 'abcdefghijklmnopqrstuvwxyz';
+  if (n < 26) return abc[n];
+  return nextEdgeLetter(Math.floor(n / 26) - 1) + abc[n % 26];
+}
+
+// Distinct colors for annotated faces (not red, which is the live selection color)
+const ANN_COLORS = [
+  0x4fc3f7, // sky blue
+  0x81c784, // green
+  0xffb74d, // orange
+  0xce93d8, // purple
+  0x4dd0e1, // cyan
+  0xf48fb1, // pink
+  0xc5e1a5, // lime
+  0xff8a65, // deep orange
+  0x80cbc4, // teal
+  0xfff176, // yellow
+];
+let colorIndex = 0;
+
+function addLabel(ann) {
+  const div = document.createElement('div');
+  div.className = 'face-label';
+  div.innerHTML = `<span class="face-label-id">${ann.id}</span><span class="face-label-text">${escHtml(ann.label)}</span>`;
+  const obj = new CSS2DObject(div);
+  // Offset label slightly along face normal so it sits above the surface
+  const [px, py, pz] = ann.click_point;
+  const [nx, ny, nz] = ann.normal;
+  const offset = 3;
+  obj.position.set(px + nx * offset, py + ny * offset, pz + nz * offset);
+  scene.add(obj);
+  labelObjects.set(ann.id, obj);
+}
+
+function removeLabel(id) {
+  const obj = labelObjects.get(id);
+  if (obj) { scene.remove(obj); labelObjects.delete(id); }
+}
+
+function addAnnotationMesh(ann) {
+  if (!modelMesh) return;
+  const normal = new THREE.Vector3(...ann.normal);
+  const cp     = new THREE.Vector3(...ann.click_point);
+  const planeD = cp.dot(normal);
+  const positions = collectCoplanarPositions(modelMesh.geometry, normal, planeD);
+  const color = ANN_COLORS[colorIndex % ANN_COLORS.length];
+  colorIndex++;
+  const mesh = makeFaceMesh(positions, color, 0.55, true);
+  mesh.position.copy(modelMesh.position);
+  scene.add(mesh);
+  annotationMeshes.set(ann.id, { mesh, color });
+}
+
+function removeAnnotationMesh(id) {
+  const entry = annotationMeshes.get(id);
+  if (entry) { scene.remove(entry.mesh); entry.mesh.geometry.dispose(); annotationMeshes.delete(id); }
+}
+
+function syncAnnotationMeshes() {
+  for (const id of [...annotationMeshes.keys()]) {
+    if (!annotations.find(a => a.id === id)) removeAnnotationMesh(id);
+  }
+  for (const ann of annotations) {
+    if (!annotationMeshes.has(ann.id)) addAnnotationMesh(ann);
+  }
+}
+
+function syncLabels() {
+  // Remove labels for deleted annotations
+  for (const id of [...labelObjects.keys()]) {
+    if (!annotations.find(a => a.id === id)) removeLabel(id);
+  }
+  // Add labels for new annotations
+  for (const ann of annotations) {
+    if (!labelObjects.has(ann.id)) addLabel(ann);
+  }
+}
+
+// Check visibility of each label via raycasting against the model
+const _rayOcc = new THREE.Raycaster();
+function checkLabelOcclusion(obj) {
+  const labelPos = new THREE.Vector3();
+  obj.getWorldPosition(labelPos);
+  const dir = labelPos.clone().sub(camera.position);
+  const dist = dir.length();
+  _rayOcc.set(camera.position, dir.normalize());
+  _rayOcc.far = dist - 0.5;
+  const hits = _rayOcc.intersectObject(modelMesh);
+  obj.element.style.opacity = hits.length > 0 ? '0' : '1';
+  obj.element.style.transition = 'opacity 0.15s';
+}
+function updateLabelVisibility() {
+  if (!modelMesh) return;
+  for (const [, obj] of labelObjects)     checkLabelOcclusion(obj);
+  for (const [, obj] of edgeLabelObjects) checkLabelOcclusion(obj);
+}
+
+// 按 scad-terminology.md：+Y = 前，-Y = 后，+X = 右，-X = 左，+Z = 上，-Z = 下
+const SEMANTIC_DIRS = [
+  { label: 'TOP',    vec: new THREE.Vector3( 0,  0,  1) },
+  { label: 'BOTTOM', vec: new THREE.Vector3( 0,  0, -1) },
+  { label: 'RIGHT',  vec: new THREE.Vector3( 1,  0,  0) },
+  { label: 'LEFT',   vec: new THREE.Vector3(-1,  0,  0) },
+  { label: 'FRONT',  vec: new THREE.Vector3( 0,  1,  0) },
+  { label: 'BACK',   vec: new THREE.Vector3( 0, -1,  0) },
+];
+
+function inferSemantic(normal) {
+  let best = { label: 'OBLIQUE', dot: -Infinity };
+  for (const dir of SEMANTIC_DIRS) {
+    const dot = normal.dot(dir.vec);
+    if (dot > best.dot) best = { label: dir.label, dot };
+  }
+  return { semantic: best.dot < 0.9 ? 'OBLIQUE' : best.label, confidence: parseFloat(best.dot.toFixed(3)) };
+}
+
+// Estimate area of the planar face containing faceIndex (same plane, not just same normal)
+function estimatePlanarArea(geometry, faceIndex) {
+  const pos = geometry.attributes.position;
+  const nor = geometry.attributes.normal;
+  const faceNormal = new THREE.Vector3().fromBufferAttribute(nor, faceIndex * 3).normalize();
+  const v0 = new THREE.Vector3().fromBufferAttribute(pos, faceIndex * 3);
+  const planeD = v0.dot(faceNormal);
+  const THRESH = 0.99, PLANE_EPS = 0.15;
+
+  let totalArea = 0;
+  const count = pos.count / 3;
+  const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
+  const e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
+  const triNormal = new THREE.Vector3();
+
+  for (let i = 0; i < count; i++) {
+    triNormal.fromBufferAttribute(nor, i * 3).normalize();
+    if (triNormal.dot(faceNormal) >= THRESH) {
+      vA.fromBufferAttribute(pos, i * 3);
+      if (Math.abs(vA.dot(faceNormal) - planeD) <= PLANE_EPS) {
+        vB.fromBufferAttribute(pos, i * 3 + 1);
+        vC.fromBufferAttribute(pos, i * 3 + 2);
+        e1.subVectors(vB, vA); e2.subVectors(vC, vA);
+        totalArea += e1.cross(e2).length() / 2;
+      }
+    }
+  }
+  return parseFloat(totalArea.toFixed(1));
+}
+
+// ─── STL Loading ───────────────────────────────────────────────────────────
+function loadSTL(arrayBuffer, preserveAnnotations = false) {
+  const loader = new STLLoader();
+  const geometry = loader.parse(arrayBuffer);
+  geometry.computeVertexNormals();
+
+  if (modelMesh) { scene.remove(modelMesh); modelMesh.geometry.dispose(); }
+  if (highlightMesh) { scene.remove(highlightMesh); highlightMesh = null; }
+  if (edgeLines) { scene.remove(edgeLines); edgeLines.geometry.dispose(); edgeLines = null; }
+  if (edgeHighlight) { scene.remove(edgeHighlight); edgeHighlight.geometry.dispose(); edgeHighlight = null; }
+
+  // Always remove old annotation meshes (tied to old geometry)
+  for (const id of [...annotationMeshes.keys()]) removeAnnotationMesh(id);
+
+  if (!preserveAnnotations) {
+    for (const id of [...labelObjects.keys()]) removeLabel(id);
+    for (const id of [...edgeLabelObjects.keys()]) removeEdgeLabel(id);
+    for (const id of [...annotatedEdgeLines.keys()]) removeAnnotatedEdgeLine(id);
+    annotations = []; annotationEdges = [];
+    faceCounter = 0; edgeCounter = 0; colorIndex = 0;
+    renderAnnotations(); updateExportButtons();
+  }
+
+  const material = new THREE.MeshStandardMaterial({
+    color: 0x7a8fa6,
+    roughness: 0.6,
+    metalness: 0.1,
+    side: THREE.DoubleSide,
+  });
+  modelMesh = new THREE.Mesh(geometry, material);
+  scene.add(modelMesh);
+
+  // Edge display lines (subtle dark overlay)
+  const edgesGeo = new THREE.EdgesGeometry(geometry, 15);
+  edgeLines = new THREE.LineSegments(edgesGeo,
+    new THREE.LineBasicMaterial({ color: 0x2a4060 }));
+  scene.add(edgeLines);
+
+  // Fit camera to model
+  geometry.computeBoundingBox();
+  const box = geometry.boundingBox;
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const maxDim = Math.max(size.x, size.y, size.z);
+
+  controls.target.copy(center);
+  camera.position.set(center.x, center.y - maxDim * 2, center.z + maxDim * 1.2);
+  camera.lookAt(center);
+  controls.update();
+
+  edgePickThreshold = maxDim * 0.018;  // adaptive threshold based on model size
+  document.getElementById('drop-hint').style.display = 'none';
+  document.getElementById('status').textContent = `已加载模型 | 三角面: ${geometry.attributes.position.count / 3 | 0}`;
+
+  selectedFaceData = null;
+  updateFaceInfoPanel(null);
+
+  // Re-build colored face meshes for surviving annotations using new geometry
+  if (preserveAnnotations) syncAnnotationMeshes();
+}
+
+// ─── Watch Mode — HTTP API (works with WSL, no File System Access API needed) ──
+let watchTimerId  = null;
+let watchLastMod  = 0;
+let watchStlName  = '';
+let watchJsonName = '';
+const WATCH_MS    = 1500;
+
+// Detect if running via local server (localhost) or as a plain file
+const VIA_SERVER  = location.protocol === 'http:' || location.protocol === 'https:';
+
+function setWatchUI(active, filename = '') {
+  const btn = document.getElementById('watch-btn');
+  const ind = document.getElementById('watch-indicator');
+  const lbl = document.getElementById('watch-label');
+  btn.classList.toggle('watching', active);
+  btn.textContent = active ? '停止监视' : '监视 STL';
+  ind.classList.toggle('active', active);
+  if (active && filename) lbl.textContent = `监视中: ${filename}`;
+}
+
+async function startWatching() {
+  if (!VIA_SERVER) {
+    alert('监视模式需要通过服务器访问页面。\n请运行 bash build.sh，然后访问：\nhttp://localhost:8080/viewer/index.html');
+    return;
+  }
+  if (watchTimerId) { stopWatching(); return; }
+  try {
+    const files = await fetch('/api/list-stl').then(r => r.json());
+    if (files.length === 0) { alert('model/ 目录中没有 STL 文件'); return; }
+    if (files.length === 1) {
+      await activateSTL(files[0]);
+    } else {
+      showSTLPicker(files);
+    }
+  } catch (e) { alert('无法连接服务器，请确认 build.sh 已运行'); console.error(e); }
+}
+
+async function activateSTL(name) {
+  watchStlName  = name;
+  watchJsonName = name.replace(/\.stl$/i, '.json');
+  watchScadName = name.replace(/\.stl$/i, '.scad');
+
+  // 1. 加载 STL，完成后恢复 JSON 标注
+  await loadSTLFromServer(name, false);
+  await restoreAnnotationsFromJSON(watchJsonName);
+
+  // 2. 加载 SCAD 预览
+  await loadScadPreview(watchScadName);
+
+  setWatchUI(true, name);
+  clearInterval(watchTimerId);
+  clearInterval(scadTimerId);
+
+  // STL 监视：每 1.5 秒
+  watchTimerId = setInterval(async () => {
+    try {
+      const { mtime } = await fetch(`/api/stl-mtime?file=${encodeURIComponent(name)}`).then(r => r.json());
+      if (mtime > watchLastMod) {
+        watchLastMod = mtime;
+        await loadSTLFromServer(name, true);
+        flashStatus(`模型已更新 — ${name}`);
+      }
+    } catch { /* server may be restarting */ }
+  }, WATCH_MS);
+
+  // SCAD 监视：每 4 秒（变化不频繁）
+  scadTimerId = setInterval(async () => {
+    try {
+      const { mtime } = await fetch(`/api/scad-mtime?file=${encodeURIComponent(watchScadName)}`).then(r => r.json());
+      if (mtime > scadLastMod) {
+        scadLastMod = mtime;
+        await loadScadPreview(watchScadName);
+      }
+    } catch { /* ignore */ }
+  }, 4000);
+}
+
+async function loadSTLFromServer(name, preserve) {
+  const resp = await fetch(`/api/stl?file=${encodeURIComponent(name)}`);
+  if (!resp.ok) { flashStatus('加载失败'); return; }
+  const { mtime } = await fetch(`/api/stl-mtime?file=${encodeURIComponent(name)}`).then(r => r.json());
+  watchLastMod = mtime;
+  const buf = await resp.arrayBuffer();
+  document.getElementById('status').textContent = `正在加载 ${name}...`;
+  loadSTL(buf, preserve);
+}
+
+// ─── SCAD 预览 ────────────────────────────────────────────────────────────
+let watchScadName = '';
+let scadLastMod   = 0;
+let scadTimerId   = null;
+
+const SCAD_KW = /\b(module|function|for|if|else|let|each|include|use|difference|union|intersection|hull|minkowski|linear_extrude|rotate_extrude|translate|rotate|scale|mirror|multmatrix|color|offset|projection|render|surface|cube|sphere|cylinder|polyhedron|polygon|circle|square|text|import)\b/g;
+
+function highlightScad(code) {
+  const escaped = code
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return escaped
+    .split('\n')
+    .map(line => {
+      let h = line
+        .replace(/\/\/.*$/g,         m => `<span class="cm">${m}</span>`)
+        .replace(/"[^"]*"/g,         m => `<span class="st">${m}</span>`)
+        .replace(/\b\d+(\.\d+)?\b/g, m => `<span class="nm">${m}</span>`)
+        .replace(SCAD_KW,            m => `<span class="kw">${m}</span>`);
+      return `<span class="ln">${h}</span>`;
+    })
+    .join('');
+}
+
+async function loadScadPreview(scadName) {
+  const resp = await fetch(`/api/scad?file=${encodeURIComponent(scadName)}`);
+  const el   = document.getElementById('scad-code');
+  const fn   = document.getElementById('scad-filename');
+  const mt   = document.getElementById('scad-mtime');
+  if (!resp.ok) {
+    el.innerHTML = `<span style="color:#555">${scadName} 不存在</span>`;
+    fn.textContent = 'SCAD 预览'; return;
+  }
+  const { content, mtime } = await resp.json();
+  scadLastMod = mtime;
+  fn.textContent = scadName;
+  mt.textContent = new Date(mtime * 1000).toLocaleTimeString();
+  el.innerHTML = highlightScad(content);
+}
+
+// ─── 从 JSON 恢复标注 ────────────────────────────────────────────────────
+async function restoreAnnotationsFromJSON(jsonName) {
+  try {
+    const resp = await fetch(`/api/json?file=${encodeURIComponent(jsonName)}`);
+    if (!resp.ok) return; // JSON 文件不存在，跳过
+    const data = await resp.json();
+    if (!data.faces || data.faces.length === 0) return;
+
+    annotations = (data.faces || []).map(f => ({
+      id: f.id, label: f.label || '', notes: f.notes || '',
+      normal: f.normal, click_point: f.click_point,
+      area_mm2: f.area_mm2, semantic: f.semantic,
+      semantic_confidence: f.semantic_confidence, faceIndex: null,
+    }));
+    faceCounter = annotations.reduce((max, a) => {
+      return Math.max(max, parseInt(a.id.replace('face_', '')) || 0);
+    }, 0);
+    colorIndex = faceCounter % ANN_COLORS.length;
+
+    // Restore edge annotations
+    annotationEdges = (data.edges || []).map(e => ({
+      id: e.id, label: e.label || '', notes: e.notes || '',
+      start: e.start, end: e.end, midpoint: e.midpoint,
+      direction: e.direction, length_mm: e.length_mm,
+    }));
+    // Derive edgeCounter from last letter-based id
+    edgeCounter = annotationEdges.reduce((max, a) => {
+      const letter = a.id.replace('edge_', '');
+      // Convert letter back to index: a=0, b=1, ..., z=25, aa=26...
+      let n = 0;
+      for (const ch of letter) n = n * 26 + ch.charCodeAt(0) - 97 + 1;
+      return Math.max(max, n);
+    }, 0);
+
+    // Rebuild visual elements for restored edges
+    for (const id of [...annotatedEdgeLines.keys()]) removeAnnotatedEdgeLine(id);
+    for (const id of [...edgeLabelObjects.keys()]) removeEdgeLabel(id);
+    annotationEdges.forEach(ann => { addAnnotatedEdgeLine(ann); addEdgeLabel(ann); });
+
+    renderAnnotations();
+    updateExportButtons();
+    flashStatus(`已恢复 ${annotations.length} 个标注`);
+  } catch (e) { console.error('恢复标注失败', e); }
+}
+
+function showSTLPicker(files) {
+  const modal = document.getElementById('stl-picker-modal');
+  document.getElementById('stl-picker-dir').textContent = `model/ 目录　共 ${files.length} 个 STL 文件`;
+  const list = document.getElementById('stl-picker-list');
+  list.innerHTML = '';
+  for (const name of files) {
+    const btn = document.createElement('button');
+    btn.className = 'stl-pick-btn';
+    btn.textContent = name;
+    btn.addEventListener('click', async () => {
+      modal.style.display = 'none';
+      await activateSTL(name);
+    });
+    list.appendChild(btn);
+  }
+  modal.style.display = 'flex';
+}
+
+document.getElementById('stl-picker-cancel').addEventListener('click', () => {
+  document.getElementById('stl-picker-modal').style.display = 'none';
+});
+
+function stopWatching() {
+  clearInterval(watchTimerId); clearInterval(scadTimerId);
+  watchTimerId = null; scadTimerId = null;
+  watchStlName = ''; watchJsonName = ''; watchScadName = '';
+  setWatchUI(false);
+}
+
+// SCAD 面板折叠按钮
+document.getElementById('toggle-scad').addEventListener('click', () => {
+  document.getElementById('scad-panel').classList.toggle('collapsed');
+});
+
+document.getElementById('watch-btn').addEventListener('click', startWatching);
+
+// ─── File Loading Handlers ─────────────────────────────────────────────────
+document.getElementById('file-input').addEventListener('change', e => {
+  stopWatching();
+  const file = e.target.files[0];
+  if (file) readFile(file, false);
+});
+
+function readFile(file, preserve = false) {
+  document.getElementById('status').textContent = `正在加载 ${file.name}...`;
+  const reader = new FileReader();
+  reader.onload = ev => loadSTL(ev.target.result, preserve);
+  reader.readAsArrayBuffer(file);
+}
+
+// Receive file from the plain-script drop handler via CustomEvent
+window.addEventListener('stl-file-dropped', e => { stopWatching(); readFile(e.detail.file, false); });
+
+// ─── Face Selection via Raycaster ──────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let mouseDown = { x: 0, y: 0 };
+
+renderer.domElement.addEventListener('mousedown', e => {
+  mouseDown.x = e.clientX;
+  mouseDown.y = e.clientY;
+});
+
+renderer.domElement.addEventListener('mouseup', e => {
+  // Only trigger click if mouse didn't move much (not a drag)
+  if (Math.abs(e.clientX - mouseDown.x) > 4 || Math.abs(e.clientY - mouseDown.y) > 4) return;
+  if (!modelMesh) return;
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+
+  // ── Edge detection first ──
+  if (edgeLines) {
+    raycaster.params.Line = { threshold: edgePickThreshold };
+    const edgeHits = raycaster.intersectObject(edgeLines);
+    if (edgeHits.length > 0) {
+      handleEdgeClick(edgeHits[0]);
+      return;
+    }
+  }
+
+  // ── Face detection ──
+  const hits = raycaster.intersectObject(modelMesh);
+  if (hits.length === 0) { clearSelection(); return; }
+
+  const hit = hits[0];
+  const faceIndex = hit.faceIndex;
+  const geometry = modelMesh.geometry;
+  const nor = geometry.attributes.normal;
+  const normal = new THREE.Vector3().fromBufferAttribute(nor, faceIndex * 3).normalize();
+  const clickPoint = hit.point;
+  const area = estimatePlanarArea(geometry, faceIndex);
+  const { semantic, confidence } = inferSemantic(normal);
+
+  selectedFaceData = {
+    faceIndex,
+    normal:     [normal.x, normal.y, normal.z].map(v => parseFloat(v.toFixed(2))),
+    click_point:[clickPoint.x, clickPoint.y, clickPoint.z].map(v => parseFloat(v.toFixed(2))),
+    area_mm2: area, semantic, semantic_confidence: confidence,
+  };
+  selectedEdgeData = null;
+  selectedType = 'face';
+
+  if (edgeHighlight) { scene.remove(edgeHighlight); edgeHighlight.geometry.dispose(); edgeHighlight = null; }
+  updateSelectionPanel();
+  showHighlight(geometry, faceIndex, normal);
+  document.getElementById('input-label').setAttribute('list', 'label-presets');
+  document.getElementById('add-btn').disabled = false;
+});
+
+function handleEdgeClick(hit) {
+  const pos = edgeLines.geometry.attributes.position;
+  // hit.index is the vertex index in the LineSegments; edges are pairs 0-1, 2-3, ...
+  const i = hit.index % 2 === 0 ? hit.index : hit.index - 1;
+  const vA = new THREE.Vector3().fromBufferAttribute(pos, i);
+  const vB = new THREE.Vector3().fromBufferAttribute(pos, i + 1);
+  const mid = vA.clone().add(vB).multiplyScalar(0.5);
+  const dir = vB.clone().sub(vA).normalize();
+
+  selectedEdgeData = {
+    segIdx:    i,
+    start:     [vA.x, vA.y, vA.z].map(v => parseFloat(v.toFixed(2))),
+    end:       [vB.x, vB.y, vB.z].map(v => parseFloat(v.toFixed(2))),
+    midpoint:  [mid.x, mid.y, mid.z].map(v => parseFloat(v.toFixed(2))),
+    direction: [dir.x, dir.y, dir.z].map(v => parseFloat(v.toFixed(2))),
+    length_mm: parseFloat(vA.distanceTo(vB).toFixed(2)),
+  };
+  selectedFaceData = null;
+  selectedType = 'edge';
+
+  // Yellow selection highlight
+  if (edgeHighlight) { scene.remove(edgeHighlight); edgeHighlight.geometry.dispose(); }
+  const hlGeo = new THREE.BufferGeometry().setFromPoints([vA, vB]);
+  edgeHighlight = new THREE.LineSegments(hlGeo,
+    new THREE.LineBasicMaterial({ color: 0xffdd00, depthTest: false }));
+  scene.add(edgeHighlight);
+
+  // Clear face highlight
+  if (highlightMesh) { scene.remove(highlightMesh); highlightMesh = null; }
+
+  updateSelectionPanel();
+  // Auto-fill label with next predicted letter
+  document.getElementById('input-label').value = nextEdgeLetter(edgeCounter);
+  document.getElementById('input-label').setAttribute('list', 'edge-label-presets');
+  document.getElementById('add-btn').disabled = false;
+}
+
+function clearSelection() {
+  selectedFaceData = null; selectedEdgeData = null; selectedType = 'none';
+  if (highlightMesh) { scene.remove(highlightMesh); highlightMesh = null; }
+  if (edgeHighlight) { scene.remove(edgeHighlight); edgeHighlight.geometry.dispose(); edgeHighlight = null; }
+  updateSelectionPanel();
+  document.getElementById('add-btn').disabled = true;
+}
+
+// Edge label (CSS2DObject, orange style)
+function addEdgeLabel(ann) {
+  const div = document.createElement('div');
+  div.className = 'edge-label';
+  div.innerHTML = `<span class="edge-label-id">${ann.id}</span><span class="face-label-text">${escHtml(ann.label)}</span>`;
+  const obj = new CSS2DObject(div);
+  const [mx, my, mz] = ann.midpoint;
+  obj.position.set(mx, my, mz);
+  scene.add(obj);
+  edgeLabelObjects.set(ann.id, obj);
+}
+function removeEdgeLabel(id) {
+  const obj = edgeLabelObjects.get(id);
+  if (obj) { scene.remove(obj); edgeLabelObjects.delete(id); }
+}
+
+// Red highlight line for annotated edges
+function addAnnotatedEdgeLine(ann) {
+  const [ax, ay, az] = ann.start, [bx, by, bz] = ann.end;
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(ax, ay, az), new THREE.Vector3(bx, by, bz),
+  ]);
+  const line = new THREE.LineSegments(geo,
+    new THREE.LineBasicMaterial({ color: 0xe94560, depthTest: false }));
+  scene.add(line);
+  annotatedEdgeLines.set(ann.id, line);
+}
+function removeAnnotatedEdgeLine(id) {
+  const line = annotatedEdgeLines.get(id);
+  if (line) { scene.remove(line); line.geometry.dispose(); annotatedEdgeLines.delete(id); }
+}
+
+// Collect triangles matching both normal direction AND the same plane (normal + d).
+// planeD = dot(normal, any_point_on_plane) — distinguishes parallel faces at different depths.
+function collectCoplanarPositions(geometry, normal, planeD, normalThresh = 0.99, planeEps = 0.15) {
+  const pos = geometry.attributes.position;
+  const nor = geometry.attributes.normal;
+  const count = pos.count / 3;
+  const positions = [];
+  const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
+  const triNormal = new THREE.Vector3();
+  for (let i = 0; i < count; i++) {
+    triNormal.fromBufferAttribute(nor, i * 3).normalize();
+    if (triNormal.dot(normal) >= normalThresh) {
+      vA.fromBufferAttribute(pos, i * 3);
+      // Check that this triangle sits on the same plane (within epsilon)
+      if (Math.abs(vA.dot(normal) - planeD) <= planeEps) {
+        vB.fromBufferAttribute(pos, i * 3 + 1);
+        vC.fromBufferAttribute(pos, i * 3 + 2);
+        positions.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
+      }
+    }
+  }
+  return positions;
+}
+
+function makeFaceMesh(positions, color, opacity, depthTest) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.computeVertexNormals();
+  return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.4,
+    metalness: 0.1,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity,
+    depthTest,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+  }));
+}
+
+function showHighlight(geometry, faceIndex, normal) {
+  if (highlightMesh) { scene.remove(highlightMesh); highlightMesh.geometry.dispose(); }
+  // Compute planeD from the clicked triangle's first vertex
+  const v0 = new THREE.Vector3().fromBufferAttribute(geometry.attributes.position, faceIndex * 3);
+  const planeD = v0.dot(normal);
+  const positions = collectCoplanarPositions(geometry, normal, planeD);
+  highlightMesh = makeFaceMesh(positions, 0xe94560, 0.85, false);
+  highlightMesh.position.copy(modelMesh.position);
+  scene.add(highlightMesh);
+}
+
+// ─── UI Updates ────────────────────────────────────────────────────────────
+function updateSelectionPanel() {
+  const noSel    = document.getElementById('no-selection');
+  const fProps   = document.getElementById('face-props');
+  const eProps   = document.getElementById('edge-props');
+  const title    = document.getElementById('selection-title');
+
+  noSel.style.display  = 'none';
+  fProps.style.display = 'none';
+  eProps.style.display = 'none';
+
+  if (selectedType === 'face' && selectedFaceData) {
+    title.textContent = '选中面信息';
+    fProps.style.display = 'block';
+    document.getElementById('prop-normal').textContent     = `[${selectedFaceData.normal.join(', ')}]`;
+    document.getElementById('prop-point').textContent      = `[${selectedFaceData.click_point.join(', ')}]`;
+    document.getElementById('prop-area').textContent       = `${selectedFaceData.area_mm2} mm²`;
+    document.getElementById('prop-semantic').textContent   = selectedFaceData.semantic;
+    document.getElementById('prop-confidence').textContent = selectedFaceData.semantic_confidence;
+  } else if (selectedType === 'edge' && selectedEdgeData) {
+    title.textContent = '选中边信息';
+    eProps.style.display = 'block';
+    document.getElementById('prop-edge-len').textContent   = `${selectedEdgeData.length_mm} mm`;
+    document.getElementById('prop-edge-start').textContent = `[${selectedEdgeData.start.join(', ')}]`;
+    document.getElementById('prop-edge-end').textContent   = `[${selectedEdgeData.end.join(', ')}]`;
+    document.getElementById('prop-edge-dir').textContent   = `[${selectedEdgeData.direction.join(', ')}]`;
+  } else {
+    title.textContent = '选中元素';
+    noSel.style.display = 'block';
+  }
+}
+// Keep old name as alias for callers that still use it
+function updateFaceInfoPanel(data) {
+  if (!data) { selectedType = 'none'; selectedFaceData = null; }
+  updateSelectionPanel();
+}
+
+// ─── Annotations ───────────────────────────────────────────────────────────
+document.getElementById('add-btn').addEventListener('click', () => {
+  const label = document.getElementById('input-label').value.trim();
+  const notes = document.getElementById('input-notes').value.trim();
+  document.getElementById('input-label').value = '';
+  document.getElementById('input-notes').value = '';
+
+  if (selectedType === 'edge' && selectedEdgeData) {
+    const letter = nextEdgeLetter(edgeCounter);
+    const id = `edge_${letter}`;
+    edgeCounter++;
+    const ann = { id, label: label || letter, notes, ...selectedEdgeData };
+    annotationEdges.push(ann);
+    addAnnotatedEdgeLine(ann);
+    addEdgeLabel(ann);
+  } else if (selectedType === 'face' && selectedFaceData) {
+    faceCounter++;
+    const id = `face_${String(faceCounter).padStart(3, '0')}`;
+    annotations.push({ id, label: label || `面 ${faceCounter}`, notes, ...selectedFaceData });
+  } else return;
+
+  renderAnnotations();
+  updateExportButtons();
+});
+
+function renderAnnotations() {
+  const list  = document.getElementById('annotations-list');
+  const empty = document.getElementById('empty-list');
+  list.querySelectorAll('.annotation-card').forEach(el => el.remove());
+
+  const total = annotations.length + annotationEdges.length;
+  if (total === 0) { empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+
+  // Face cards
+  annotations.forEach(ann => {
+    const card = document.createElement('div');
+    card.className = 'annotation-card';
+    card.innerHTML = `
+      <div class="annotation-id"><span class="ann-type face">面</span>${ann.id}</div>
+      <div class="annotation-label">${escHtml(ann.label)}</div>
+      ${ann.notes ? `<div class="annotation-notes">${escHtml(ann.notes)}</div>` : ''}
+      <div class="annotation-meta">法线: [${ann.normal.join(', ')}] | ${ann.semantic}</div>
+      <button class="delete-btn" data-id="${ann.id}" data-type="face" title="删除">×</button>`;
+    list.appendChild(card);
+  });
+
+  // Edge cards
+  annotationEdges.forEach(ann => {
+    const card = document.createElement('div');
+    card.className = 'annotation-card edge-card';
+    card.innerHTML = `
+      <div class="annotation-id"><span class="ann-type edge">边</span>${ann.id}</div>
+      <div class="annotation-label">${escHtml(ann.label)}</div>
+      ${ann.notes ? `<div class="annotation-notes">${escHtml(ann.notes)}</div>` : ''}
+      <div class="annotation-meta">${ann.length_mm} mm | [${ann.direction.join(', ')}]</div>
+      <button class="delete-btn" data-id="${ann.id}" data-type="edge" title="删除">×</button>`;
+    list.appendChild(card);
+  });
+
+  list.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.type === 'edge') {
+        removeAnnotatedEdgeLine(btn.dataset.id);
+        removeEdgeLabel(btn.dataset.id);
+        annotationEdges = annotationEdges.filter(a => a.id !== btn.dataset.id);
+      } else {
+        annotations = annotations.filter(a => a.id !== btn.dataset.id);
+      }
+      renderAnnotations();
+      updateExportButtons();
+    });
+  });
+
+  syncLabels();
+  syncAnnotationMeshes();
+}
+
+function updateExportButtons() {
+  const disabled = annotations.length === 0 && annotationEdges.length === 0;
+  document.getElementById('btn-save').disabled = disabled;
+  document.getElementById('btn-download').disabled = disabled;
+  document.getElementById('btn-copy').disabled = disabled;
+}
+
+function escHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ─── Export ────────────────────────────────────────────────────────────────
+function buildJSON() {
+  return JSON.stringify({
+    version: '1.0',
+    scad_file: watchStlName.replace(/\.stl$/i, '.scad') || 'example.scad',
+    stl_file:  watchStlName || 'example.stl',
+    generated_at: new Date().toISOString().slice(0, 19),
+    coordinate_system: 'OpenSCAD (Z-up, mm)',
+    faces: annotations.map(ann => ({
+      id: ann.id, label: ann.label,
+      normal: ann.normal, click_point: ann.click_point,
+      area_mm2: ann.area_mm2, semantic: ann.semantic,
+      semantic_confidence: ann.semantic_confidence, notes: ann.notes,
+    })),
+    edges: annotationEdges.map(ann => ({
+      id: ann.id, label: ann.label,
+      start: ann.start, end: ann.end,
+      midpoint: ann.midpoint, direction: ann.direction,
+      length_mm: ann.length_mm, notes: ann.notes,
+    })),
+  }, null, 2);
+}
+
+document.getElementById('btn-save').addEventListener('click', async () => {
+  if (VIA_SERVER && watchJsonName) {
+    try {
+      const resp = await fetch('/api/save-json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: watchJsonName, content: buildJSON() }),
+      });
+      if (resp.ok) flashStatus(`已保存 ${watchJsonName}`);
+      else flashStatus('保存失败');
+    } catch (e) { console.error(e); flashStatus('保存失败'); }
+  } else {
+    document.getElementById('btn-download').click();
+  }
+});
+
+document.getElementById('btn-download').addEventListener('click', () => {
+  const blob = new Blob([buildJSON()], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'geometry.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  flashStatus('已下载 geometry.json');
+});
+
+document.getElementById('btn-copy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(buildJSON());
+    flashStatus('已复制到剪贴板');
+  } catch {
+    flashStatus('复制失败，请手动下载');
+  }
+});
+
+function flashStatus(msg) {
+  const el = document.getElementById('status');
+  const prev = el.textContent;
+  el.textContent = msg;
+  el.style.color = '#4fc3f7';
+  setTimeout(() => { el.textContent = prev; el.style.color = ''; }, 2000);
+}
+
+// Start render loop after all state variables are declared
+animate();
+</script>
+<!-- STL 多文件选择 Modal -->
+<div id="stl-picker-modal">
+  <div id="stl-picker-box">
+    <h3>选择要加载的 STL 文件</h3>
+    <p id="stl-picker-dir"></p>
+    <div id="stl-picker-list"></div>
+    <button id="stl-picker-cancel">取消</button>
+  </div>
+</div>
+</body>
+</html>
