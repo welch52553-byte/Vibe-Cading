@@ -124,6 +124,8 @@
   .ann-type.edge { background: #3a1a10; color: #ff8a65; }
   .annotation-card.edge-card { border-color: #3a2a1a; }
   .annotation-card.edge-card:hover { border-color: #ff8a65; }
+  .annotation-card.invalid { border-color: #7a3a00; background: #1a1000; }
+  .ann-invalid-badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 4px; background: #7a3a00; color: #ffb74d; vertical-align: middle; }
 
   /* STL 选择 Modal */
   #stl-picker-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 999; align-items: center; justify-content: center; }
@@ -780,6 +782,7 @@ async function restoreAnnotationsFromJSON(jsonName) {
       normal: f.normal, click_point: f.click_point,
       area_mm2: f.area_mm2, semantic: f.semantic,
       semantic_confidence: f.semantic_confidence, faceIndex: null,
+      status: f.status || 'valid',
     }));
     faceCounter = annotations.reduce((max, a) => {
       return Math.max(max, parseInt(a.id.replace('face_', '')) || 0);
@@ -791,6 +794,7 @@ async function restoreAnnotationsFromJSON(jsonName) {
       id: e.id, label: e.label || '', notes: e.notes || '',
       start: e.start, end: e.end, midpoint: e.midpoint,
       direction: e.direction, length_mm: e.length_mm,
+      status: e.status || 'valid',
     }));
     // Derive edgeCounter from last letter-based id
     edgeCounter = annotationEdges.reduce((max, a) => {
@@ -1128,11 +1132,13 @@ function renderAnnotations() {
 
   // Face cards
   annotations.forEach(ann => {
+    const isInvalid = ann.status === 'invalid';
     const card = document.createElement('div');
-    card.className = 'annotation-card';
+    card.className = 'annotation-card' + (isInvalid ? ' invalid' : '');
     card.innerHTML = `
-      <div class="annotation-id"><span class="ann-type face">面</span>${ann.id}</div>
+      <div class="annotation-id"><span class="ann-type face">面</span>${ann.id}${isInvalid ? '<span class="ann-invalid-badge">⚠ 失效</span>' : ''}</div>
       <div class="annotation-label">${escHtml(ann.label)}</div>
+      ${isInvalid ? '<div class="annotation-notes" style="color:#ffb74d">几何已变更，请删除后重新标注</div>' : ''}
       ${ann.notes ? `<div class="annotation-notes">${escHtml(ann.notes)}</div>` : ''}
       <div class="annotation-meta">法线: [${ann.normal.join(', ')}] | ${ann.semantic}</div>
       <button class="delete-btn" data-id="${ann.id}" data-type="face" title="删除">×</button>`;
@@ -1141,11 +1147,13 @@ function renderAnnotations() {
 
   // Edge cards
   annotationEdges.forEach(ann => {
+    const isInvalid = ann.status === 'invalid';
     const card = document.createElement('div');
-    card.className = 'annotation-card edge-card';
+    card.className = 'annotation-card edge-card' + (isInvalid ? ' invalid' : '');
     card.innerHTML = `
-      <div class="annotation-id"><span class="ann-type edge">边</span>${ann.id}</div>
+      <div class="annotation-id"><span class="ann-type edge">边</span>${ann.id}${isInvalid ? '<span class="ann-invalid-badge">⚠ 失效</span>' : ''}</div>
       <div class="annotation-label">${escHtml(ann.label)}</div>
+      ${isInvalid ? '<div class="annotation-notes" style="color:#ffb74d">几何已变更，请删除后重新标注</div>' : ''}
       ${ann.notes ? `<div class="annotation-notes">${escHtml(ann.notes)}</div>` : ''}
       <div class="annotation-meta">${ann.length_mm} mm | [${ann.direction.join(', ')}]</div>
       <button class="delete-btn" data-id="${ann.id}" data-type="edge" title="删除">×</button>`;

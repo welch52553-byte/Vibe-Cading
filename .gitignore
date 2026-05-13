@@ -1,0 +1,8 @@
+PROGRESS.md
+scad-terminology.md
+
+# Compiled STL output
+model/*.stl
+
+# Claude Code internal
+.claude/
