@@ -1185,31 +1185,19 @@ async function startExternalMode() {
     scadFiles.push('example.scad');
   }
 
-  // Write AI_CONTEXT.md to folder
+  // AI_CONTEXT.md 整个文件夹公用，写入一次
   const aiResp = await fetch('/model/AI_CONTEXT.md');
   if (aiResp.ok) await writeExternalFile(dirHandle, 'AI_CONTEXT.md', await aiResp.text());
 
-  // Create empty JSON for each SCAD that doesn't have one
-  for (const scadName of scadFiles) {
-    const jsonName = scadName.replace(/\.scad$/i, '.json');
-    try { await dirHandle.getFileHandle(jsonName); } catch {
-      const empty = JSON.stringify({
-        version: '1.0', scad_file: scadName,
-        stl_file: scadName.replace(/\.scad$/i, '.stl'),
-        generated_at: new Date().toISOString().slice(0, 19),
-        coordinate_system: 'OpenSCAD (Z-up, mm)',
-        faces: [], edges: [],
-      }, null, 2);
-      await writeExternalFile(dirHandle, jsonName, empty);
-    }
-  }
-
   externalDirHandle = dirHandle;
   workMode = 'external';
+  setStatus('');
 
+  // 单文件直接激活；多文件让用户选择主 SCAD（dep 文件会被自动作为依赖加载）
   if (scadFiles.length === 1) {
     await activateExternalSCAD(scadFiles[0]);
   } else {
+    scadFiles.sort();
     showSCADPicker(scadFiles, activateExternalSCAD);
   }
 }
@@ -1225,6 +1213,17 @@ async function activateExternalSCAD(name) {
   watchScadName    = name;
   watchJsonName    = name.replace(/\.scad$/i, '.json');
   externalLastContent = '';
+
+  // JSON 跟随 SCAD 文件名，仅在选定后创建（dep 文件不会产生多余的 JSON）
+  try { await externalDirHandle.getFileHandle(watchJsonName); } catch {
+    await writeExternalFile(externalDirHandle, watchJsonName, JSON.stringify({
+      version: '1.0', scad_file: name,
+      stl_file: name.replace(/\.scad$/i, '.stl'),
+      generated_at: new Date().toISOString().slice(0, 19),
+      coordinate_system: 'OpenSCAD (Z-up, mm)',
+      faces: [], edges: [],
+    }, null, 2));
+  }
 
   setWatchUI(true, name);
   clearInterval(watchTimerId);
