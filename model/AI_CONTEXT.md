@@ -80,9 +80,11 @@ Y 轴（↗）= 前后，正方向朝前（屏幕外）
 
 ```
 已修改 {模型名}.scad。
-请运行：bash build.sh
-浏览器将自动重载模型。
+浏览器检测到文件变化后会自动编译并重新渲染（约 2 秒轮询间隔）。
+无需手动运行任何命令。
 ```
+
+> 注：SCAD 编译已在浏览器内完成（openscad-wasm），不需要本地安装 OpenSCAD，也不需要 build.sh 编译步骤。
 
 ---
 
@@ -167,7 +169,7 @@ Content-Type: application/json
 
 | 端点 | 方法 | 说明 |
 |---|---|---|
-| `/api/list-stl` | GET | 列出 model/ 目录中所有 .stl 文件 |
+| `/api/list-scad` | GET | 列出 model/ 目录中所有 .scad 文件 |
 | `/api/scad?file=x.scad` | GET | 读取 SCAD 源码 |
 | `/api/json?file=x.json` | GET | 读取标注 JSON |
 | `/api/save-json` | POST | 写入标注 JSON |

@@ -381,9 +381,17 @@
   <button id="toggle-scad" title="显示/隐藏 SCAD 预览">SCAD</button>
   <button id="load-btn" onclick="document.getElementById('file-input').click()">加载 STL</button>
   <input type="file" id="file-input" accept=".stl">
-  <button id="watch-btn" title="选择 STL 文件并自动监视变化，模型更新时保留标注">监视 STL</button>
+  <button id="watch-btn" title="监视 SCAD 文件，保存后自动编译渲染">监视 SCAD</button>
   <div id="watch-indicator"><div id="watch-dot"></div><span id="watch-label">监视中</span></div>
-  <span id="status">拖拽 STL 文件到左侧区域，或点击"加载 STL"</span>
+  <label style="font-size:11px;color:#8b8f99;display:flex;align-items:center;gap:4px;flex-shrink:0;">
+    $fn
+    <select id="fn-select" style="height:24px;border:1px solid #e5e6eb;border-radius:4px;padding:0 6px;font-size:11px;background:#fff;color:#1f2024;cursor:pointer;">
+      <option value="16">16 快速</option>
+      <option value="32" selected>32 标准</option>
+      <option value="64">64 精细</option>
+    </select>
+  </label>
+  <span id="status">正在加载 OpenSCAD…</span>
 </div>
 
 <div id="main">
@@ -881,14 +889,64 @@ function loadSTL(arrayBuffer, preserveAnnotations = false) {
   if (preserveAnnotations) syncAnnotationMeshes();
 }
 
-// ─── Watch Mode — HTTP API (works with WSL, no File System Access API needed) ──
-let watchTimerId  = null;
-let watchLastMod  = 0;
-let watchStlName  = '';
-let watchJsonName = '';
-const WATCH_MS    = 1500;
+// ─── OpenSCAD WASM Worker ──────────────────────────────────────────────────
+const worker = new Worker('/viewer/worker.js', { type: 'module' });
+let workerReady   = false;
+let compilePending = null;
 
-// Detect if running via local server (localhost) or as a plain file
+worker.onmessage = ({ data }) => {
+  switch (data.type) {
+    case 'ready':
+      workerReady = true;
+      setStatus('OpenSCAD 就绪');
+      break;
+    case 'init_error':
+      setStatus('OpenSCAD 加载失败 — ' + data.message, '#e03030');
+      break;
+    case 'result':
+      if (compilePending) { compilePending.resolve(data.stl); compilePending = null; }
+      break;
+    case 'error':
+      if (compilePending) { compilePending.reject(new Error(data.message)); compilePending = null; }
+      break;
+  }
+};
+
+function setStatus(msg, color = '') {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.style.color = color;
+}
+
+function compileScad(source) {
+  const fn = parseInt(document.getElementById('fn-select')?.value) || 32;
+  return new Promise((resolve, reject) => {
+    if (!workerReady) { reject(new Error('OpenSCAD 未就绪，请等待初始化')); return; }
+    if (compilePending) compilePending.reject(new Error('cancelled'));
+    compilePending = { resolve, reject };
+    worker.postMessage({ type: 'compile', source, fn });
+  });
+}
+
+async function compileAndRender(source, preserve) {
+  setStatus('编译中…', '#f08a3e');
+  try {
+    const stlBuffer = await compileScad(source);
+    loadSTL(stlBuffer, preserve);
+    setStatus('编译完成 — ' + watchScadName);
+  } catch (e) {
+    setStatus('编译失败: ' + e.message, '#e03030');
+    console.error('编译失败:', e);
+  }
+}
+
+// ─── Watch Mode ────────────────────────────────────────────────────────────
+let watchTimerId  = null;
+let watchScadName = '';
+let watchJsonName = '';
+let scadLastMod   = 0;
+const WATCH_MS    = 2000;
+
 const VIA_SERVER  = location.protocol === 'http:' || location.protocol === 'https:';
 
 function setWatchUI(active, filename = '') {
@@ -896,7 +954,7 @@ function setWatchUI(active, filename = '') {
   const ind = document.getElementById('watch-indicator');
   const lbl = document.getElementById('watch-label');
   btn.classList.toggle('watching', active);
-  btn.textContent = active ? '停止监视' : '监视 STL';
+  btn.textContent = active ? '停止监视' : '监视 SCAD';
   ind.classList.toggle('active', active);
   if (active && filename) lbl.textContent = `监视中: ${filename}`;
 }
@@ -908,71 +966,46 @@ async function startWatching() {
   }
   if (watchTimerId) { stopWatching(); return; }
   try {
-    const files = await fetch('/api/list-stl').then(r => r.json());
-    if (files.length === 0) { alert('model/ 目录中没有 STL 文件'); return; }
+    const files = await fetch('/api/list-scad').then(r => r.json());
+    if (files.length === 0) { alert('model/ 目录中没有 SCAD 文件'); return; }
     if (files.length === 1) {
-      await activateSTL(files[0]);
+      await activateSCAD(files[0]);
     } else {
-      showSTLPicker(files);
+      showSCADPicker(files);
     }
   } catch (e) { alert('无法连接服务器，请确认 build.sh 已运行'); console.error(e); }
 }
 
-async function activateSTL(name) {
-  watchStlName  = name;
-  watchJsonName = name.replace(/\.stl$/i, '.json');
-  watchScadName = name.replace(/\.stl$/i, '.scad');
-
-  // 1. 加载 STL，完成后恢复 JSON 标注
-  await loadSTLFromServer(name, false);
-  await restoreAnnotationsFromJSON(watchJsonName);
-
-  // 2. 加载 SCAD 预览
-  await loadScadPreview(watchScadName);
+async function activateSCAD(name) {
+  watchScadName = name;
+  watchJsonName = name.replace(/\.scad$/i, '.json');
 
   setWatchUI(true, name);
   clearInterval(watchTimerId);
-  clearInterval(scadTimerId);
 
-  // STL 监视：每 1.5 秒
+  await refreshSCAD(name, false);
+  await restoreAnnotationsFromJSON(watchJsonName);
+
   watchTimerId = setInterval(async () => {
     try {
-      const { mtime } = await fetch(`/api/stl-mtime?file=${encodeURIComponent(name)}`).then(r => r.json());
-      if (mtime > watchLastMod) {
-        watchLastMod = mtime;
-        await loadSTLFromServer(name, true);
-        flashStatus(`模型已更新 — ${name}`);
+      const { mtime } = await fetch(`/api/scad-mtime?file=${encodeURIComponent(name)}`).then(r => r.json());
+      if (mtime > scadLastMod) {
+        await refreshSCAD(name, true);
       }
     } catch { /* server may be restarting */ }
   }, WATCH_MS);
-
-  // SCAD 监视：每 4 秒（变化不频繁）
-  scadTimerId = setInterval(async () => {
-    try {
-      const { mtime } = await fetch(`/api/scad-mtime?file=${encodeURIComponent(watchScadName)}`).then(r => r.json());
-      if (mtime > scadLastMod) {
-        scadLastMod = mtime;
-        await loadScadPreview(watchScadName);
-      }
-    } catch { /* ignore */ }
-  }, 4000);
 }
 
-async function loadSTLFromServer(name, preserve) {
-  const resp = await fetch(`/api/stl?file=${encodeURIComponent(name)}`);
-  if (!resp.ok) { flashStatus('加载失败'); return; }
-  const { mtime } = await fetch(`/api/stl-mtime?file=${encodeURIComponent(name)}`).then(r => r.json());
-  watchLastMod = mtime;
-  const buf = await resp.arrayBuffer();
-  document.getElementById('status').textContent = `正在加载 ${name}...`;
-  loadSTL(buf, preserve);
+async function refreshSCAD(name, preserve) {
+  const resp = await fetch(`/api/scad?file=${encodeURIComponent(name)}`);
+  if (!resp.ok) { setStatus('读取 SCAD 失败', '#e03030'); return; }
+  const { content, mtime } = await resp.json();
+  scadLastMod = mtime;
+  renderScadPreview(name, content, mtime);
+  await compileAndRender(content, preserve);
 }
 
 // ─── SCAD 预览 ────────────────────────────────────────────────────────────
-let watchScadName = '';
-let scadLastMod   = 0;
-let scadTimerId   = null;
-
 const SCAD_KW = /\b(module|function|for|if|else|let|each|include|use|difference|union|intersection|hull|minkowski|linear_extrude|rotate_extrude|translate|rotate|scale|mirror|multmatrix|color|offset|projection|render|surface|cube|sphere|cylinder|polyhedron|polygon|circle|square|text|import)\b/g;
 
 function highlightScad(code) {
@@ -991,20 +1024,22 @@ function highlightScad(code) {
     .join('');
 }
 
+function renderScadPreview(scadName, content, mtime) {
+  document.getElementById('scad-filename').textContent = scadName;
+  document.getElementById('scad-mtime').textContent = new Date(mtime * 1000).toLocaleTimeString();
+  document.getElementById('scad-code').innerHTML = highlightScad(content);
+}
+
 async function loadScadPreview(scadName) {
   const resp = await fetch(`/api/scad?file=${encodeURIComponent(scadName)}`);
-  const el   = document.getElementById('scad-code');
-  const fn   = document.getElementById('scad-filename');
-  const mt   = document.getElementById('scad-mtime');
   if (!resp.ok) {
-    el.innerHTML = `<span style="color:#555">${scadName} 不存在</span>`;
-    fn.textContent = 'SCAD 预览'; return;
+    document.getElementById('scad-code').innerHTML = `<span style="color:#555">${scadName} 不存在</span>`;
+    document.getElementById('scad-filename').textContent = 'SCAD 预览';
+    return;
   }
   const { content, mtime } = await resp.json();
   scadLastMod = mtime;
-  fn.textContent = scadName;
-  mt.textContent = new Date(mtime * 1000).toLocaleTimeString();
-  el.innerHTML = highlightScad(content);
+  renderScadPreview(scadName, content, mtime);
 }
 
 // ─── 从 JSON 恢复标注 ────────────────────────────────────────────────────
@@ -1054,9 +1089,9 @@ async function restoreAnnotationsFromJSON(jsonName) {
   } catch (e) { console.error('恢复标注失败', e); }
 }
 
-function showSTLPicker(files) {
+function showSCADPicker(files) {
   const modal = document.getElementById('stl-picker-modal');
-  document.getElementById('stl-picker-dir').textContent = `model/ 目录　共 ${files.length} 个 STL 文件`;
+  document.getElementById('stl-picker-dir').textContent = `model/ 目录　共 ${files.length} 个 SCAD 文件`;
   const list = document.getElementById('stl-picker-list');
   list.innerHTML = '';
   for (const name of files) {
@@ -1065,7 +1100,7 @@ function showSTLPicker(files) {
     btn.textContent = name;
     btn.addEventListener('click', async () => {
       modal.style.display = 'none';
-      await activateSTL(name);
+      await activateSCAD(name);
     });
     list.appendChild(btn);
   }
@@ -1077,9 +1112,9 @@ document.getElementById('stl-picker-cancel').addEventListener('click', () => {
 });
 
 function stopWatching() {
-  clearInterval(watchTimerId); clearInterval(scadTimerId);
-  watchTimerId = null; scadTimerId = null;
-  watchStlName = ''; watchJsonName = ''; watchScadName = '';
+  clearInterval(watchTimerId);
+  watchTimerId = null;
+  watchScadName = ''; watchJsonName = '';
   setWatchUI(false);
 }
 
@@ -1431,8 +1466,8 @@ function escHtml(str) {
 function buildJSON() {
   return JSON.stringify({
     version: '1.0',
-    scad_file: watchStlName.replace(/\.stl$/i, '.scad') || 'example.scad',
-    stl_file:  watchStlName || 'example.stl',
+    scad_file: watchScadName || 'example.scad',
+    stl_file:  watchScadName.replace(/\.scad$/i, '.stl') || 'example.stl',
     generated_at: new Date().toISOString().slice(0, 19),
     coordinate_system: 'OpenSCAD (Z-up, mm)',
     faces: annotations.map(ann => ({
@@ -1497,10 +1532,10 @@ function flashStatus(msg) {
 // Start render loop after all state variables are declared
 animate();
 </script>
-<!-- STL 多文件选择 Modal -->
+<!-- SCAD 多文件选择 Modal -->
 <div id="stl-picker-modal">
   <div id="stl-picker-box">
-    <h3>选择要加载的 STL 文件</h3>
+    <h3>选择要监视的 SCAD 文件</h3>
     <p id="stl-picker-dir"></p>
     <div id="stl-picker-list"></div>
     <button id="stl-picker-cancel">取消</button>
