@@ -5,138 +5,373 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SCAD 几何标注工具</title>
 <style>
+  /* ─── Light theme palette ─────────────────────────────────────────────
+     bg          #f7f7f8   app background / canvas backdrop
+     surface     #ffffff   panels, cards, inputs
+     surface-2   #fafafb   subtle alt panel
+     border      #e5e6eb   default borders / hairlines
+     border-2    #ececf0   softer divider
+     text        #1f2024   primary text
+     text-2      #5b606b   secondary text
+     text-3      #8b8f99   tertiary / placeholder / line numbers
+     accent      #2b6cff   primary action (blue)
+     accent-h    #1e57e0   hover
+     accent-bg   #eaf1ff   accent tint
+     warn        #f08a3e   secondary highlight (orange)
+     warn-bg     #fdeede   orange tint
+  */
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", system-ui, sans-serif;
+    background: #f7f7f8;
+    color: #1f2024;
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    font-size: 13px;
+  }
 
-  #header { background: #16213e; padding: 10px 20px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #0f3460; flex-shrink: 0; }
-  #header h1 { font-size: 16px; font-weight: 600; color: #e94560; }
-  #load-btn { background: #0f3460; color: #e0e0e0; border: 1px solid #e94560; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
-  #load-btn:hover { background: #e94560; }
+  /* ─── Header ───────────────────────────────────────────────────────── */
+  #header {
+    background: #ffffff;
+    padding: 0 16px;
+    height: 44px;
+    display: flex; align-items: center; gap: 10px;
+    border-bottom: 1px solid #e5e6eb;
+    flex-shrink: 0;
+  }
+  #header h1 {
+    font-size: 13px; font-weight: 600; color: #1f2024;
+    letter-spacing: 0.1px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  #header h1::before {
+    content: ""; width: 14px; height: 14px; border-radius: 3px;
+    background: linear-gradient(135deg, #2b6cff 0%, #2b6cff 55%, #f08a3e 55%, #f08a3e 100%);
+    display: inline-block;
+  }
+  .header-sep { width: 1px; height: 18px; background: #e5e6eb; margin: 0 4px; }
+
+  /* Buttons — flat, subtle borders, blue primary */
+  button { font-family: inherit; }
+  #load-btn, #toggle-scad, #watch-btn {
+    height: 28px; padding: 0 12px; border-radius: 5px;
+    font-size: 12.5px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+  }
+  #load-btn {
+    background: #2b6cff; color: #fff; border: 1px solid #2b6cff;
+    font-weight: 500;
+  }
+  #load-btn:hover { background: #1e57e0; border-color: #1e57e0; }
+  #toggle-scad {
+    background: #ffffff; color: #5b606b; border: 1px solid #e5e6eb;
+  }
+  #toggle-scad:hover { color: #1f2024; border-color: #c8ccd4; background: #fafafb; }
+  #watch-btn {
+    background: #ffffff; color: #1f2024; border: 1px solid #e5e6eb;
+  }
+  #watch-btn:hover { border-color: #2b6cff; color: #2b6cff; background: #f5f8ff; }
+  #watch-btn.watching {
+    background: #f08a3e; color: #fff; border-color: #f08a3e; font-weight: 500;
+  }
+  #watch-btn.watching:hover { background: #e07a2e; border-color: #e07a2e; }
+
   #file-input { display: none; }
-  #status { font-size: 12px; color: #888; margin-left: auto; }
-  #toggle-scad { background: #0f3460; color: #888; border: 1px solid #2a3a50; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
-  #toggle-scad:hover { color: #e0e0e0; border-color: #4fc3f7; }
-  #watch-btn { background: #0f3460; color: #e0e0e0; border: 1px solid #55dd55; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
-  #watch-btn:hover { background: #55dd55; color: #0d0d1a; }
-  #watch-btn.watching { background: #55dd55; color: #0d0d1a; font-weight: 600; }
-  #watch-indicator { display: none; align-items: center; gap: 6px; font-size: 12px; color: #55dd55; }
-  #watch-indicator.active { display: flex; }
-  #watch-dot { width: 7px; height: 7px; border-radius: 50%; background: #55dd55; animation: pulse 1.4s ease-in-out infinite; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  #status { font-size: 12px; color: #8b8f99; margin-left: auto; }
+
+  #watch-indicator {
+    display: none; align-items: center; gap: 6px;
+    font-size: 12px; color: #f08a3e;
+    padding: 0 10px; height: 24px; border-radius: 12px;
+    background: #fdeede;
+  }
+  #watch-indicator.active { display: inline-flex; }
+  #watch-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: #f08a3e;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
 
   #main { display: flex; flex: 1; overflow: hidden; }
 
-  /* SCAD 预览面板 */
-  #scad-panel { width: 270px; background: #12192e; border-right: 1px solid #0f3460; display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; transition: width 0.2s; }
+  /* ─── SCAD 预览面板 ───────────────────────────────────────────────── */
+  #scad-panel {
+    width: 280px; background: #fafafb; border-right: 1px solid #e5e6eb;
+    display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0;
+    transition: width 0.2s;
+  }
   #scad-panel.collapsed { width: 0; border-right: none; }
-  #scad-header { padding: 10px 12px 8px; border-bottom: 1px solid #0f3460; flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
-  #scad-header h3 { font-size: 12px; color: #e94560; text-transform: uppercase; letter-spacing: 0.5px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #scad-mtime { font-size: 10px; color: #555; white-space: nowrap; }
-  #scad-code { flex: 1; overflow: auto; margin: 0; padding: 10px 12px; font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 11.5px; line-height: 1.6; color: #a8b8cc; background: transparent; white-space: pre; counter-reset: line; }
-  #scad-code .ln { display: block; }
-  #scad-code .ln::before { content: counter(line); counter-increment: line; display: inline-block; width: 24px; color: #2a3a50; text-align: right; margin-right: 10px; user-select: none; font-size: 10px; }
-  /* SCAD 基础语法颜色 */
-  #scad-code .kw { color: #4fc3f7; }
-  #scad-code .cm { color: #4a5a6a; font-style: italic; }
-  #scad-code .nm { color: #c5e1a5; }
-  #scad-code .st { color: #ffcc80; }
+  #scad-header {
+    padding: 10px 14px; border-bottom: 1px solid #ececf0;
+    flex-shrink: 0; display: flex; align-items: center; gap: 8px;
+    height: 38px;
+  }
+  #scad-header h3 {
+    font-size: 11.5px; color: #5b606b; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.6px;
+    flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #scad-mtime { font-size: 10.5px; color: #8b8f99; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #scad-code {
+    flex: 1; overflow: auto; margin: 0; padding: 10px 6px 10px 0;
+    font-family: "JetBrains Mono", "Cascadia Code", "Consolas", "SF Mono", monospace;
+    font-size: 12px; line-height: 1.6; color: #3a3d44;
+    background: #fafafb; white-space: pre; counter-reset: line;
+  }
+  #scad-code .ln { display: block; padding-right: 8px; }
+  #scad-code .ln::before {
+    content: counter(line); counter-increment: line;
+    display: inline-block; width: 32px; color: #b8bcc6;
+    text-align: right; margin-right: 12px; user-select: none;
+    font-size: 11px;
+  }
+  /* SCAD syntax — soft light-theme palette */
+  #scad-code .kw { color: #2b6cff; font-weight: 500; }
+  #scad-code .cm { color: #9aa0aa; font-style: italic; }
+  #scad-code .nm { color: #1f8a5b; }
+  #scad-code .st { color: #c84a1a; }
 
-  #canvas-wrapper { flex: 1; position: relative; background: #0d0d1a; }
-  #canvas-wrapper.drag-over { outline: 2px dashed #e94560; }
-  #drop-hint { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); text-align: center; color: #444; pointer-events: none; }
-  #drop-hint .icon { font-size: 48px; margin-bottom: 12px; }
-  #drop-hint p { font-size: 14px; }
+  /* ─── Canvas ───────────────────────────────────────────────────────── */
+  #canvas-wrapper { flex: 1; position: relative; background: #f0f1f3; }
+  #canvas-wrapper.drag-over {
+    outline: 2px dashed #2b6cff; outline-offset: -8px;
+    background: #eaf1ff;
+  }
+  #drop-hint {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%,-50%); text-align: center;
+    color: #8b8f99; pointer-events: none;
+  }
+  #drop-hint .icon { font-size: 44px; margin-bottom: 14px; opacity: 0.5; }
+  #drop-hint p { font-size: 13px; }
   canvas { display: block; max-width: 100%; max-height: 100%; }
 
-  #sidebar { width: 300px; background: #16213e; border-left: 1px solid #0f3460; display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }
+  /* ─── Sidebar ─────────────────────────────────────────────────────── */
+  #sidebar {
+    width: 304px; background: #ffffff; border-left: 1px solid #e5e6eb;
+    display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0;
+  }
 
-  #face-info { padding: 14px; border-bottom: 1px solid #0f3460; }
-  #face-info h3 { font-size: 13px; color: #e94560; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .info-row { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px; }
-  .info-label { color: #888; }
-  .info-value { color: #ccc; font-family: monospace; }
-  .semantic-badge { display: inline-block; background: #0f3460; color: #4fc3f7; padding: 1px 6px; border-radius: 3px; font-size: 11px; font-weight: 600; }
-  #no-selection { color: #555; font-size: 13px; text-align: center; padding: 20px 0; }
+  /* Section headings shared style */
+  .section-h {
+    font-size: 11px; color: #5b606b; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.7px;
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .section-h::before {
+    content: ""; width: 3px; height: 11px; background: #2b6cff;
+    border-radius: 1px;
+  }
+  .section-h.orange::before { background: #f08a3e; }
 
-  #annotation-form { padding: 14px; border-bottom: 1px solid #0f3460; }
-  #annotation-form h3 { font-size: 13px; color: #e94560; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
-  label { display: block; font-size: 12px; color: #888; margin-bottom: 4px; margin-top: 10px; }
+  #face-info { padding: 14px 16px; border-bottom: 1px solid #ececf0; }
+  .info-row {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; margin-bottom: 6px; min-height: 18px;
+  }
+  .info-label { color: #8b8f99; }
+  .info-value {
+    color: #1f2024; font-family: "JetBrains Mono", "SF Mono", monospace;
+    font-size: 11.5px; font-variant-numeric: tabular-nums;
+  }
+  .semantic-badge {
+    display: inline-block; background: #eaf1ff; color: #2b6cff;
+    padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
+    font-family: inherit;
+  }
+  #no-selection {
+    color: #8b8f99; font-size: 12.5px; text-align: center;
+    padding: 18px 0 6px;
+  }
+
+  #annotation-form { padding: 14px 16px; border-bottom: 1px solid #ececf0; }
+  label {
+    display: block; font-size: 11.5px; color: #5b606b;
+    margin-bottom: 5px; margin-top: 10px; font-weight: 500;
+  }
   label:first-of-type { margin-top: 0; }
-  input[type="text"], textarea { width: 100%; background: #0d0d1a; border: 1px solid #0f3460; color: #e0e0e0; padding: 6px 8px; border-radius: 4px; font-size: 13px; font-family: inherit; }
-  textarea { height: 60px; resize: vertical; }
-  input[type="text"]:focus, textarea:focus { outline: none; border-color: #e94560; }
-  #add-btn { width: 100%; margin-top: 10px; background: #e94560; color: white; border: none; padding: 8px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; }
-  #add-btn:hover { background: #c73652; }
-  #add-btn:disabled { background: #444; color: #666; cursor: not-allowed; }
+  input[type="text"], textarea {
+    width: 100%; background: #fafafb; border: 1px solid #e5e6eb;
+    color: #1f2024; padding: 7px 9px; border-radius: 5px;
+    font-size: 12.5px; font-family: inherit;
+    transition: border-color 0.12s, background 0.12s;
+  }
+  input[type="text"]::placeholder, textarea::placeholder { color: #b0b4be; }
+  textarea { height: 60px; resize: vertical; line-height: 1.5; }
+  input[type="text"]:focus, textarea:focus {
+    outline: none; border-color: #2b6cff; background: #ffffff;
+    box-shadow: 0 0 0 3px rgba(43,108,255,0.12);
+  }
+  #add-btn {
+    width: 100%; margin-top: 12px;
+    background: #2b6cff; color: #fff; border: none;
+    padding: 9px; border-radius: 5px; cursor: pointer;
+    font-size: 13px; font-weight: 500;
+    transition: background 0.12s;
+  }
+  #add-btn:hover { background: #1e57e0; }
+  #add-btn:disabled { background: #ececf0; color: #b0b4be; cursor: not-allowed; }
 
-  #annotations-list { flex: 1; overflow-y: auto; padding: 14px; }
-  #annotations-list h3 { font-size: 13px; color: #e94560; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .annotation-card { background: #0d0d1a; border: 1px solid #0f3460; border-radius: 6px; padding: 10px; margin-bottom: 8px; position: relative; }
-  .annotation-card:hover { border-color: #e94560; }
-  .annotation-id { font-size: 11px; color: #e94560; font-family: monospace; font-weight: 600; }
-  .annotation-label { font-size: 13px; color: #e0e0e0; margin: 4px 0 2px; }
-  .annotation-notes { font-size: 11px; color: #888; }
-  .annotation-meta { font-size: 10px; color: #555; font-family: monospace; margin-top: 4px; }
-  .delete-btn { position: absolute; top: 8px; right: 8px; background: none; border: none; color: #555; cursor: pointer; font-size: 14px; line-height: 1; }
-  .delete-btn:hover { color: #e94560; }
-  #empty-list { color: #555; font-size: 12px; text-align: center; padding: 16px 0; }
+  /* ─── Annotations list ────────────────────────────────────────────── */
+  #annotations-list { flex: 1; overflow-y: auto; padding: 14px 16px; }
+  .annotation-card {
+    background: #ffffff; border: 1px solid #e5e6eb; border-radius: 6px;
+    padding: 10px 12px; margin-bottom: 8px; position: relative;
+    transition: border-color 0.12s, box-shadow 0.12s;
+  }
+  .annotation-card:hover {
+    border-color: #c8d4ee; box-shadow: 0 1px 3px rgba(43,108,255,0.06);
+  }
+  .annotation-id {
+    font-size: 11px; color: #8b8f99;
+    font-family: "JetBrains Mono", monospace; font-weight: 500;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .annotation-label {
+    font-size: 13px; color: #1f2024; margin: 5px 0 2px; font-weight: 500;
+  }
+  .annotation-notes { font-size: 11.5px; color: #5b606b; line-height: 1.45; margin-top: 2px; }
+  .annotation-meta {
+    font-size: 10.5px; color: #8b8f99;
+    font-family: "JetBrains Mono", monospace; margin-top: 5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .delete-btn {
+    position: absolute; top: 6px; right: 6px;
+    width: 22px; height: 22px; border-radius: 4px;
+    background: none; border: none; color: #b0b4be;
+    cursor: pointer; font-size: 16px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.12s, color 0.12s;
+  }
+  .delete-btn:hover { background: #fdeede; color: #f08a3e; }
+  #empty-list { color: #b0b4be; font-size: 12px; text-align: center; padding: 20px 0; }
 
-  #export-bar { padding: 12px 14px; border-top: 1px solid #0f3460; display: flex; gap: 8px; flex-shrink: 0; }
-  #export-bar button { flex: 1; background: #0f3460; color: #e0e0e0; border: 1px solid #4fc3f7; padding: 7px; border-radius: 4px; cursor: pointer; font-size: 12px; }
-  #export-bar button:hover { background: #4fc3f7; color: #0d0d1a; font-weight: 600; }
-  #export-bar button:disabled { background: #1a1a2e; border-color: #333; color: #444; cursor: not-allowed; }
+  /* Scrollbars — light, subtle */
+  #annotations-list::-webkit-scrollbar, #scad-code::-webkit-scrollbar { width: 8px; height: 8px; }
+  #annotations-list::-webkit-scrollbar-thumb, #scad-code::-webkit-scrollbar-thumb {
+    background: #d8dae0; border-radius: 4px;
+  }
+  #annotations-list::-webkit-scrollbar-thumb:hover, #scad-code::-webkit-scrollbar-thumb:hover {
+    background: #b0b4be;
+  }
+
+  /* ─── Export bar ──────────────────────────────────────────────────── */
+  #export-bar {
+    padding: 10px 16px; border-top: 1px solid #ececf0;
+    display: flex; gap: 6px; flex-shrink: 0; background: #fafafb;
+  }
+  #export-bar button {
+    flex: 1; background: #ffffff; color: #1f2024;
+    border: 1px solid #e5e6eb; padding: 7px;
+    border-radius: 5px; cursor: pointer; font-size: 12px;
+    transition: border-color 0.12s, color 0.12s, background 0.12s;
+  }
+  #export-bar button:hover {
+    border-color: #2b6cff; color: #2b6cff; background: #f5f8ff;
+  }
+  #export-bar button:disabled {
+    background: #fafafb; border-color: #ececf0; color: #b0b4be;
+    cursor: not-allowed;
+  }
 
   /* CSS2DRenderer 容器及其所有子元素不得拦截任何鼠标/拖拽事件 */
   #canvas-wrapper > div, #canvas-wrapper > div * { pointer-events: none !important; }
 
-  /* 3D 面标注标签 */
+  /* ─── 3D 标签 — light pill, blue for face, orange for edge ────────── */
   .face-label {
-    background: rgba(13, 13, 26, 0.82);
-    border: 1px solid #e94560;
-    border-radius: 4px;
-    padding: 3px 8px 3px 6px;
+    background: rgba(255,255,255,0.96);
+    border: 1px solid #2b6cff;
+    border-radius: 10px;
+    padding: 3px 9px 3px 7px;
     font-size: 11px;
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    color: #e0e0e0;
-    white-space: nowrap;
-    pointer-events: none;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.6);
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    line-height: 1.5;
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    color: #1f2024;
+    white-space: nowrap; pointer-events: none;
+    box-shadow: 0 2px 6px rgba(15,23,42,0.10);
+    display: flex; align-items: center; gap: 5px; line-height: 1.5;
   }
   .face-label-id {
-    font-family: monospace;
-    font-weight: 700;
-    color: #e94560;
-    font-size: 10px;
+    font-family: "JetBrains Mono", monospace; font-weight: 700;
+    color: #2b6cff; font-size: 10px;
   }
-  .face-label-text { color: #ccc; }
+  .face-label-text { color: #1f2024; }
 
-  /* 边缘标注标签（橙色边框区别于面标注） */
-  .edge-label { background: rgba(13,13,26,0.82); border: 1px solid #ff8a65; border-radius: 4px; padding: 3px 8px 3px 6px; font-size: 11px; font-family: 'Segoe UI', system-ui, sans-serif; color: #e0e0e0; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,0.6); display: flex; align-items: center; gap: 5px; line-height: 1.5; }
-  .edge-label-id { font-family: monospace; font-weight: 700; color: #ff8a65; font-size: 10px; }
+  .edge-label {
+    background: rgba(255,255,255,0.96);
+    border: 1px solid #f08a3e;
+    border-radius: 10px;
+    padding: 3px 9px 3px 7px;
+    font-size: 11px;
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    color: #1f2024;
+    white-space: nowrap; pointer-events: none;
+    box-shadow: 0 2px 6px rgba(15,23,42,0.10);
+    display: flex; align-items: center; gap: 5px; line-height: 1.5;
+  }
+  .edge-label-id {
+    font-family: "JetBrains Mono", monospace; font-weight: 700;
+    color: #f08a3e; font-size: 10px;
+  }
 
-  /* 标注卡片类型徽章 */
-  .ann-type { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-right: 4px; vertical-align: middle; }
-  .ann-type.face { background: #1a3060; color: #4fc3f7; }
-  .ann-type.edge { background: #3a1a10; color: #ff8a65; }
-  .annotation-card.edge-card { border-color: #3a2a1a; }
-  .annotation-card.edge-card:hover { border-color: #ff8a65; }
-  .annotation-card.invalid { border-color: #7a3a00; background: #1a1000; }
-  .ann-invalid-badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 4px; background: #7a3a00; color: #ffb74d; vertical-align: middle; }
+  /* Annotation card type badges */
+  .ann-type {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 16px; min-width: 18px; padding: 0 5px;
+    font-size: 10px; font-weight: 600;
+    border-radius: 3px; font-family: inherit;
+  }
+  .ann-type.face { background: #eaf1ff; color: #2b6cff; }
+  .ann-type.edge { background: #fdeede; color: #f08a3e; }
+  .annotation-card.edge-card:hover {
+    border-color: #f0c8a0; box-shadow: 0 1px 3px rgba(240,138,62,0.10);
+  }
+  .annotation-card.invalid {
+    border-color: #f3c89c; background: #fff8f0;
+  }
+  .ann-invalid-badge {
+    display: inline-flex; align-items: center; height: 16px;
+    padding: 0 6px; font-size: 10px; font-weight: 600;
+    border-radius: 3px; margin-left: 4px;
+    background: #fdeede; color: #c46420;
+  }
 
-  /* STL 选择 Modal */
-  #stl-picker-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 999; align-items: center; justify-content: center; }
-  #stl-picker-box { background: #16213e; border: 1px solid #e94560; border-radius: 8px; padding: 24px 28px; min-width: 280px; max-width: 420px; }
-  #stl-picker-box h3 { font-size: 14px; color: #e94560; margin-bottom: 6px; }
-  #stl-picker-box p { font-size: 12px; color: #888; margin-bottom: 16px; }
-  #stl-picker-list { display: flex; flex-direction: column; gap: 8px; }
-  .stl-pick-btn { background: #0f3460; color: #e0e0e0; border: 1px solid #4fc3f7; padding: 9px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; text-align: left; font-family: monospace; }
-  .stl-pick-btn:hover { background: #4fc3f7; color: #0d0d1a; font-weight: 600; }
-  #stl-picker-cancel { margin-top: 14px; width: 100%; background: none; border: 1px solid #444; color: #888; padding: 7px; border-radius: 4px; cursor: pointer; font-size: 12px; }
-  #stl-picker-cancel:hover { border-color: #e94560; color: #e94560; }
+  /* ─── STL picker modal ───────────────────────────────────────────── */
+  #stl-picker-modal {
+    display: none; position: fixed; inset: 0;
+    background: rgba(31,32,36,0.35); backdrop-filter: blur(2px);
+    z-index: 999; align-items: center; justify-content: center;
+  }
+  #stl-picker-box {
+    background: #ffffff; border: 1px solid #e5e6eb;
+    border-radius: 10px; padding: 22px 24px;
+    min-width: 300px; max-width: 440px;
+    box-shadow: 0 12px 32px rgba(15,23,42,0.18);
+  }
+  #stl-picker-box h3 { font-size: 14px; color: #1f2024; margin-bottom: 4px; font-weight: 600; }
+  #stl-picker-box p { font-size: 12px; color: #8b8f99; margin-bottom: 14px; }
+  #stl-picker-list { display: flex; flex-direction: column; gap: 6px; }
+  .stl-pick-btn {
+    background: #fafafb; color: #1f2024;
+    border: 1px solid #e5e6eb; padding: 9px 12px;
+    border-radius: 6px; cursor: pointer; font-size: 12.5px;
+    text-align: left; font-family: "JetBrains Mono", monospace;
+    transition: border-color 0.12s, background 0.12s;
+  }
+  .stl-pick-btn:hover {
+    background: #f5f8ff; border-color: #2b6cff; color: #2b6cff;
+  }
+  #stl-picker-cancel {
+    margin-top: 14px; width: 100%;
+    background: #ffffff; border: 1px solid #e5e6eb;
+    color: #5b606b; padding: 8px; border-radius: 6px;
+    cursor: pointer; font-size: 12.5px;
+    transition: border-color 0.12s, color 0.12s;
+  }
+  #stl-picker-cancel:hover { border-color: #c8ccd4; color: #1f2024; }
 </style>
 </head>
 <body>
@@ -157,7 +392,7 @@
       <h3 id="scad-filename">SCAD 预览</h3>
       <span id="scad-mtime">—</span>
     </div>
-    <pre id="scad-code"><span style="color:#555">启动监视后自动加载…</span></pre>
+    <pre id="scad-code"><span style="color:#b0b4be">启动监视后自动加载…</span></pre>
   </div>
   <div id="canvas-wrapper">
     <div id="drop-hint">
@@ -169,7 +404,7 @@
 
   <div id="sidebar">
     <div id="face-info">
-      <h3 id="selection-title">选中元素</h3>
+      <h3 id="selection-title" class="section-h">选中元素</h3>
       <div id="no-selection">点击模型的面或边以查看属性</div>
       <!-- 面属性 -->
       <div id="face-props" style="display:none">
@@ -189,7 +424,7 @@
     </div>
 
     <div id="annotation-form">
-      <h3>添加标注</h3>
+      <h3 class="section-h">添加标注</h3>
       <label>标签（Label）</label>
       <input type="text" id="input-label" list="label-presets" placeholder="输入或从下拉选择…" autocomplete="off">
       <!-- 边缘标注 datalist：小写字母 -->
@@ -222,7 +457,7 @@
     </div>
 
     <div id="annotations-list">
-      <h3>已添加标注</h3>
+      <h3 class="section-h orange">已添加标注</h3>
       <div id="empty-list">暂无标注</div>
     </div>
 
@@ -283,7 +518,7 @@ labelRenderer.domElement.style.cssText = 'position:absolute;top:0;left:0;pointer
 wrapper.appendChild(labelRenderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0d0d1a);
+scene.background = new THREE.Color(0xf0f1f3);
 
 // Z-up camera: position camera so Z-up model looks natural
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 10000);
@@ -297,11 +532,11 @@ controls.dampingFactor = 0.08;
 controls.zoomSpeed = 1.2;
 
 // Lighting
-scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
+scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.75);
 dirLight1.position.set(1, -1, 2);
 scene.add(dirLight1);
-const dirLight2 = new THREE.DirectionalLight(0x4080ff, 0.3);
+const dirLight2 = new THREE.DirectionalLight(0xc8d4ee, 0.35);
 dirLight2.position.set(-1, 1, -1);
 scene.add(dirLight2);
 
@@ -309,7 +544,7 @@ scene.add(dirLight2);
 scene.add(new THREE.AxesHelper(50));
 
 // Grid on XY plane
-const grid = new THREE.GridHelper(200, 20, 0x222244, 0x1a1a3a);
+const grid = new THREE.GridHelper(200, 20, 0xc8ccd4, 0xdcdfe5);
 grid.rotation.x = Math.PI / 2;  // rotate so grid is on XY plane (Z-up)
 scene.add(grid);
 
@@ -337,9 +572,9 @@ const gCtx = gizmoCanvas.getContext('2d');
 
 // World axes: vec, color, positive label, negative label
 const GIZMO_AXES = [
-  { vec: new THREE.Vector3(1, 0, 0),  color: '#ff5555', pos: '+X 右', neg: '-X 左' },
-  { vec: new THREE.Vector3(0, 1, 0),  color: '#55dd55', pos: '+Y 前', neg: '-Y 后' },
-  { vec: new THREE.Vector3(0, 0, 1),  color: '#4499ff', pos: '+Z 上', neg: '-Z 下' },
+  { vec: new THREE.Vector3(1, 0, 0),  color: '#d93030', pos: '+X 右', neg: '-X 左' },
+  { vec: new THREE.Vector3(0, 1, 0),  color: '#2a8a4a', pos: '+Y 前', neg: '-Y 后' },
+  { vec: new THREE.Vector3(0, 0, 1),  color: '#2b6cff', pos: '+Z 上', neg: '-Z 下' },
 ];
 
 function drawGizmo() {
@@ -347,10 +582,13 @@ function drawGizmo() {
   gCtx.clearRect(0, 0, GIZMO_SIZE, GIZMO_SIZE);
 
   // Background circle
-  gCtx.fillStyle = 'rgba(13, 13, 26, 0.72)';
+  gCtx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+  gCtx.strokeStyle = 'rgba(0, 0, 0, 0.08)';
+  gCtx.lineWidth = 1;
   gCtx.beginPath();
   gCtx.arc(cx, cy, 62, 0, Math.PI * 2);
   gCtx.fill();
+  gCtx.stroke();
 
   // Extract camera right/up/forward from world matrix
   const right = new THREE.Vector3(), up = new THREE.Vector3(), fwd = new THREE.Vector3();
@@ -439,18 +677,18 @@ function nextEdgeLetter(n) {
   return nextEdgeLetter(Math.floor(n / 26) - 1) + abc[n % 26];
 }
 
-// Distinct colors for annotated faces (not red, which is the live selection color)
+// Distinct colors for annotated faces (light-theme palette — softer, sit on white bg)
 const ANN_COLORS = [
-  0x4fc3f7, // sky blue
-  0x81c784, // green
-  0xffb74d, // orange
-  0xce93d8, // purple
-  0x4dd0e1, // cyan
-  0xf48fb1, // pink
-  0xc5e1a5, // lime
-  0xff8a65, // deep orange
-  0x80cbc4, // teal
-  0xfff176, // yellow
+  0x2b6cff, // accent blue
+  0xf08a3e, // accent orange
+  0x1f8a5b, // green
+  0x7c3aed, // violet
+  0x0891b2, // teal
+  0xd946ef, // pink
+  0x65a30d, // lime
+  0xea580c, // deep orange
+  0x0d9488, // dark teal
+  0xb45309, // amber
 ];
 let colorIndex = 0;
 
@@ -604,9 +842,9 @@ function loadSTL(arrayBuffer, preserveAnnotations = false) {
   }
 
   const material = new THREE.MeshStandardMaterial({
-    color: 0x7a8fa6,
-    roughness: 0.6,
-    metalness: 0.1,
+    color: 0xc4cad4,
+    roughness: 0.55,
+    metalness: 0.05,
     side: THREE.DoubleSide,
   });
   modelMesh = new THREE.Mesh(geometry, material);
@@ -615,7 +853,7 @@ function loadSTL(arrayBuffer, preserveAnnotations = false) {
   // Edge display lines (subtle dark overlay)
   const edgesGeo = new THREE.EdgesGeometry(geometry, 15);
   edgeLines = new THREE.LineSegments(edgesGeo,
-    new THREE.LineBasicMaterial({ color: 0x2a4060 }));
+    new THREE.LineBasicMaterial({ color: 0x6b7280 }));
   scene.add(edgeLines);
 
   // Fit camera to model
@@ -775,7 +1013,7 @@ async function restoreAnnotationsFromJSON(jsonName) {
     const resp = await fetch(`/api/json?file=${encodeURIComponent(jsonName)}`);
     if (!resp.ok) return; // JSON 文件不存在，跳过
     const data = await resp.json();
-    if (!data.faces || data.faces.length === 0) return;
+    if ((!data.faces || data.faces.length === 0) && (!data.edges || data.edges.length === 0)) return;
 
     annotations = (data.faces || []).map(f => ({
       id: f.id, label: f.label || '', notes: f.notes || '',
@@ -953,7 +1191,7 @@ function handleEdgeClick(hit) {
   if (edgeHighlight) { scene.remove(edgeHighlight); edgeHighlight.geometry.dispose(); }
   const hlGeo = new THREE.BufferGeometry().setFromPoints([vA, vB]);
   edgeHighlight = new THREE.LineSegments(hlGeo,
-    new THREE.LineBasicMaterial({ color: 0xffdd00, depthTest: false }));
+    new THREE.LineBasicMaterial({ color: 0xf08a3e, depthTest: false, linewidth: 2 }));
   scene.add(edgeHighlight);
 
   // Clear face highlight
@@ -997,7 +1235,7 @@ function addAnnotatedEdgeLine(ann) {
     new THREE.Vector3(ax, ay, az), new THREE.Vector3(bx, by, bz),
   ]);
   const line = new THREE.LineSegments(geo,
-    new THREE.LineBasicMaterial({ color: 0xe94560, depthTest: false }));
+    new THREE.LineBasicMaterial({ color: 0xf08a3e, depthTest: false }));
   scene.add(line);
   annotatedEdgeLines.set(ann.id, line);
 }
@@ -1054,7 +1292,7 @@ function showHighlight(geometry, faceIndex, normal) {
   const v0 = new THREE.Vector3().fromBufferAttribute(geometry.attributes.position, faceIndex * 3);
   const planeD = v0.dot(normal);
   const positions = collectCoplanarPositions(geometry, normal, planeD);
-  highlightMesh = makeFaceMesh(positions, 0xe94560, 0.85, false);
+  highlightMesh = makeFaceMesh(positions, 0x2b6cff, 0.7, false);
   highlightMesh.position.copy(modelMesh.position);
   scene.add(highlightMesh);
 }
@@ -1138,7 +1376,7 @@ function renderAnnotations() {
     card.innerHTML = `
       <div class="annotation-id"><span class="ann-type face">面</span>${ann.id}${isInvalid ? '<span class="ann-invalid-badge">⚠ 失效</span>' : ''}</div>
       <div class="annotation-label">${escHtml(ann.label)}</div>
-      ${isInvalid ? '<div class="annotation-notes" style="color:#ffb74d">几何已变更，请删除后重新标注</div>' : ''}
+      ${isInvalid ? '<div class="annotation-notes" style="color:#c46420">几何已变更，请删除后重新标注</div>' : ''}
       ${ann.notes ? `<div class="annotation-notes">${escHtml(ann.notes)}</div>` : ''}
       <div class="annotation-meta">法线: [${ann.normal.join(', ')}] | ${ann.semantic}</div>
       <button class="delete-btn" data-id="${ann.id}" data-type="face" title="删除">×</button>`;
@@ -1153,7 +1391,7 @@ function renderAnnotations() {
     card.innerHTML = `
       <div class="annotation-id"><span class="ann-type edge">边</span>${ann.id}${isInvalid ? '<span class="ann-invalid-badge">⚠ 失效</span>' : ''}</div>
       <div class="annotation-label">${escHtml(ann.label)}</div>
-      ${isInvalid ? '<div class="annotation-notes" style="color:#ffb74d">几何已变更，请删除后重新标注</div>' : ''}
+      ${isInvalid ? '<div class="annotation-notes" style="color:#c46420">几何已变更，请删除后重新标注</div>' : ''}
       ${ann.notes ? `<div class="annotation-notes">${escHtml(ann.notes)}</div>` : ''}
       <div class="annotation-meta">${ann.length_mm} mm | [${ann.direction.join(', ')}]</div>
       <button class="delete-btn" data-id="${ann.id}" data-type="edge" title="删除">×</button>`;
@@ -1252,7 +1490,7 @@ function flashStatus(msg) {
   const el = document.getElementById('status');
   const prev = el.textContent;
   el.textContent = msg;
-  el.style.color = '#4fc3f7';
+  el.style.color = '#2b6cff';
   setTimeout(() => { el.textContent = prev; el.style.color = ''; }, 2000);
 }
 
