@@ -54,17 +54,12 @@
 
   /* Buttons — flat, subtle borders, blue primary */
   button { font-family: inherit; }
-  #load-btn, #toggle-scad, #watch-btn {
+  #toggle-scad, #watch-btn {
     height: 28px; padding: 0 12px; border-radius: 5px;
     font-size: 12.5px; cursor: pointer;
     display: inline-flex; align-items: center; gap: 6px;
     transition: background 0.12s, border-color 0.12s, color 0.12s;
   }
-  #load-btn {
-    background: #2b6cff; color: #fff; border: 1px solid #2b6cff;
-    font-weight: 500;
-  }
-  #load-btn:hover { background: #1e57e0; border-color: #1e57e0; }
   #toggle-scad {
     background: #ffffff; color: #5b606b; border: 1px solid #e5e6eb;
   }
@@ -78,7 +73,6 @@
   }
   #watch-btn.watching:hover { background: #e07a2e; border-color: #e07a2e; }
 
-  #file-input { display: none; }
   #status { font-size: 12px; color: #8b8f99; margin-left: auto; }
 
   #watch-indicator {
@@ -372,6 +366,17 @@
     transition: border-color 0.12s, color 0.12s;
   }
   #stl-picker-cancel:hover { border-color: #c8ccd4; color: #1f2024; }
+
+  /* ─── Mode option buttons ────────────────────────────────────────── */
+  .mode-option-btn {
+    background: #fafafb; border: 1px solid #e5e6eb; border-radius: 7px;
+    padding: 14px 16px; cursor: pointer; text-align: left;
+    font-family: inherit; width: 100%;
+    transition: border-color 0.12s, background 0.12s;
+  }
+  .mode-option-btn:hover { background: #f5f8ff; border-color: #2b6cff; }
+  .mode-option-btn strong { display: block; font-size: 13px; color: #1f2024; margin-bottom: 4px; }
+  .mode-option-btn span { font-size: 11.5px; color: #8b8f99; line-height: 1.4; }
 </style>
 </head>
 <body>
@@ -379,16 +384,14 @@
 <div id="header">
   <h1>SCAD 几何标注工具</h1>
   <button id="toggle-scad" title="显示/隐藏 SCAD 预览">SCAD</button>
-  <button id="load-btn" onclick="document.getElementById('file-input').click()">加载 STL</button>
-  <input type="file" id="file-input" accept=".stl">
-  <button id="watch-btn" title="监视 SCAD 文件，保存后自动编译渲染">监视 SCAD</button>
+  <button id="watch-btn" title="关联本地 OpenSCAD 项目文件夹">关联 OpenSCAD 项目</button>
   <div id="watch-indicator"><div id="watch-dot"></div><span id="watch-label">监视中</span></div>
   <label style="font-size:11px;color:#8b8f99;display:flex;align-items:center;gap:4px;flex-shrink:0;">
-    $fn
+    模型精度
     <select id="fn-select" style="height:24px;border:1px solid #e5e6eb;border-radius:4px;padding:0 6px;font-size:11px;background:#fff;color:#1f2024;cursor:pointer;">
-      <option value="16">16 快速</option>
-      <option value="32" selected>32 标准</option>
-      <option value="64">64 精细</option>
+      <option value="16">快速预览</option>
+      <option value="32" selected>标准</option>
+      <option value="64">精细</option>
     </select>
   </label>
   <span id="status">正在加载 OpenSCAD…</span>
@@ -406,7 +409,7 @@
     <div id="drop-hint">
       <div class="icon">📦</div>
       <p>拖拽 STL 文件到此处</p>
-      <p style="margin-top:6px;font-size:12px;">或点击上方"加载 STL"按钮</p>
+      <p style="margin-top:6px;font-size:12px;">或点击上方"关联 OpenSCAD 项目"</p>
     </div>
   </div>
 
@@ -959,19 +962,25 @@ function setWatchUI(active, filename = '') {
   if (active && filename) lbl.textContent = `监视中: ${filename}`;
 }
 
-async function startWatching() {
+function startWatching() {
+  if (watchTimerId) { stopWatching(); return; }
+  document.getElementById('mode-modal').style.display = 'flex';
+}
+
+async function startProjectMode() {
+  document.getElementById('mode-modal').style.display = 'none';
   if (!VIA_SERVER) {
-    alert('监视模式需要通过服务器访问页面。\n请运行 bash build.sh，然后访问：\nhttp://localhost:8080/viewer/index.html');
+    alert('项目文件夹模式需要通过服务器访问页面。\n请运行 bash build.sh，然后访问：\nhttp://localhost:8080/viewer/index.html');
     return;
   }
-  if (watchTimerId) { stopWatching(); return; }
   try {
     const files = await fetch('/api/list-scad').then(r => r.json());
     if (files.length === 0) { alert('model/ 目录中没有 SCAD 文件'); return; }
+    workMode = 'project';
     if (files.length === 1) {
       await activateSCAD(files[0]);
     } else {
-      showSCADPicker(files);
+      showSCADPicker(files, activateSCAD);
     }
   } catch (e) { alert('无法连接服务器，请确认 build.sh 已运行'); console.error(e); }
 }
@@ -1043,55 +1052,55 @@ async function loadScadPreview(scadName) {
 }
 
 // ─── 从 JSON 恢复标注 ────────────────────────────────────────────────────
+function applyAnnotationData(data) {
+  if ((!data.faces || data.faces.length === 0) && (!data.edges || data.edges.length === 0)) return;
+
+  annotations = (data.faces || []).map(f => ({
+    id: f.id, label: f.label || '', notes: f.notes || '',
+    normal: f.normal, click_point: f.click_point,
+    area_mm2: f.area_mm2, semantic: f.semantic,
+    semantic_confidence: f.semantic_confidence, faceIndex: null,
+    status: f.status || 'valid',
+  }));
+  faceCounter = annotations.reduce((max, a) => Math.max(max, parseInt(a.id.replace('face_', '')) || 0), 0);
+  colorIndex  = faceCounter % ANN_COLORS.length;
+
+  annotationEdges = (data.edges || []).map(e => ({
+    id: e.id, label: e.label || '', notes: e.notes || '',
+    start: e.start, end: e.end, midpoint: e.midpoint,
+    direction: e.direction, length_mm: e.length_mm,
+    status: e.status || 'valid',
+  }));
+  edgeCounter = annotationEdges.reduce((max, a) => {
+    const letter = a.id.replace('edge_', '');
+    let n = 0;
+    for (const ch of letter) n = n * 26 + ch.charCodeAt(0) - 97 + 1;
+    return Math.max(max, n);
+  }, 0);
+
+  for (const id of [...annotatedEdgeLines.keys()]) removeAnnotatedEdgeLine(id);
+  for (const id of [...edgeLabelObjects.keys()]) removeEdgeLabel(id);
+  annotationEdges.forEach(ann => { addAnnotatedEdgeLine(ann); addEdgeLabel(ann); });
+
+  renderAnnotations();
+  updateExportButtons();
+  if (annotations.length) flashStatus(`已恢复 ${annotations.length} 个标注`);
+}
+
 async function restoreAnnotationsFromJSON(jsonName) {
   try {
     const resp = await fetch(`/api/json?file=${encodeURIComponent(jsonName)}`);
-    if (!resp.ok) return; // JSON 文件不存在，跳过
-    const data = await resp.json();
-    if ((!data.faces || data.faces.length === 0) && (!data.edges || data.edges.length === 0)) return;
-
-    annotations = (data.faces || []).map(f => ({
-      id: f.id, label: f.label || '', notes: f.notes || '',
-      normal: f.normal, click_point: f.click_point,
-      area_mm2: f.area_mm2, semantic: f.semantic,
-      semantic_confidence: f.semantic_confidence, faceIndex: null,
-      status: f.status || 'valid',
-    }));
-    faceCounter = annotations.reduce((max, a) => {
-      return Math.max(max, parseInt(a.id.replace('face_', '')) || 0);
-    }, 0);
-    colorIndex = faceCounter % ANN_COLORS.length;
-
-    // Restore edge annotations
-    annotationEdges = (data.edges || []).map(e => ({
-      id: e.id, label: e.label || '', notes: e.notes || '',
-      start: e.start, end: e.end, midpoint: e.midpoint,
-      direction: e.direction, length_mm: e.length_mm,
-      status: e.status || 'valid',
-    }));
-    // Derive edgeCounter from last letter-based id
-    edgeCounter = annotationEdges.reduce((max, a) => {
-      const letter = a.id.replace('edge_', '');
-      // Convert letter back to index: a=0, b=1, ..., z=25, aa=26...
-      let n = 0;
-      for (const ch of letter) n = n * 26 + ch.charCodeAt(0) - 97 + 1;
-      return Math.max(max, n);
-    }, 0);
-
-    // Rebuild visual elements for restored edges
-    for (const id of [...annotatedEdgeLines.keys()]) removeAnnotatedEdgeLine(id);
-    for (const id of [...edgeLabelObjects.keys()]) removeEdgeLabel(id);
-    annotationEdges.forEach(ann => { addAnnotatedEdgeLine(ann); addEdgeLabel(ann); });
-
-    renderAnnotations();
-    updateExportButtons();
-    flashStatus(`已恢复 ${annotations.length} 个标注`);
+    if (!resp.ok) return;
+    applyAnnotationData(await resp.json());
   } catch (e) { console.error('恢复标注失败', e); }
 }
 
-function showSCADPicker(files) {
+function showSCADPicker(files, onSelect) {
   const modal = document.getElementById('stl-picker-modal');
-  document.getElementById('stl-picker-dir').textContent = `model/ 目录　共 ${files.length} 个 SCAD 文件`;
+  const label = workMode === 'external'
+    ? `已有文件夹　共 ${files.length} 个 SCAD 文件`
+    : `model/ 目录　共 ${files.length} 个 SCAD 文件`;
+  document.getElementById('stl-picker-dir').textContent = label;
   const list = document.getElementById('stl-picker-list');
   list.innerHTML = '';
   for (const name of files) {
@@ -1100,7 +1109,7 @@ function showSCADPicker(files) {
     btn.textContent = name;
     btn.addEventListener('click', async () => {
       modal.style.display = 'none';
-      await activateSCAD(name);
+      await onSelect(name);
     });
     list.appendChild(btn);
   }
@@ -1115,7 +1124,126 @@ function stopWatching() {
   clearInterval(watchTimerId);
   watchTimerId = null;
   watchScadName = ''; watchJsonName = '';
+  workMode = 'none'; externalDirHandle = null; externalLastContent = '';
   setWatchUI(false);
+}
+
+// ─── External Folder Mode ─────────────────────────────────────────────────
+let workMode          = 'none';   // 'project' | 'external'
+let externalDirHandle = null;
+let externalLastContent = '';
+
+async function startExternalMode() {
+  document.getElementById('mode-modal').style.display = 'none';
+  if (!window.showDirectoryPicker) {
+    alert('此功能需要 Chrome 或 Edge 浏览器（107+）。'); return;
+  }
+  let dirHandle;
+  try {
+    dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+  } catch (e) {
+    if (e.name !== 'AbortError') setStatus('无法打开文件夹', '#e03030');
+    return;
+  }
+
+  setStatus('正在初始化文件夹…', '#f08a3e');
+
+  // Scan for SCAD files
+  const scadFiles = [];
+  for await (const [name, handle] of dirHandle.entries()) {
+    if (handle.kind === 'file' && name.toLowerCase().endsWith('.scad')) scadFiles.push(name);
+  }
+
+  // No SCAD → create example.scad from project template
+  if (scadFiles.length === 0) {
+    const resp = await fetch('/model/example.scad');
+    const content = resp.ok ? await resp.text() : 'cube([10, 10, 10]);\n';
+    await writeExternalFile(dirHandle, 'example.scad', content);
+    scadFiles.push('example.scad');
+  }
+
+  // Write AI_CONTEXT.md to folder
+  const aiResp = await fetch('/model/AI_CONTEXT.md');
+  if (aiResp.ok) await writeExternalFile(dirHandle, 'AI_CONTEXT.md', await aiResp.text());
+
+  // Create empty JSON for each SCAD that doesn't have one
+  for (const scadName of scadFiles) {
+    const jsonName = scadName.replace(/\.scad$/i, '.json');
+    try { await dirHandle.getFileHandle(jsonName); } catch {
+      const empty = JSON.stringify({
+        version: '1.0', scad_file: scadName,
+        stl_file: scadName.replace(/\.scad$/i, '.stl'),
+        generated_at: new Date().toISOString().slice(0, 19),
+        coordinate_system: 'OpenSCAD (Z-up, mm)',
+        faces: [], edges: [],
+      }, null, 2);
+      await writeExternalFile(dirHandle, jsonName, empty);
+    }
+  }
+
+  externalDirHandle = dirHandle;
+  workMode = 'external';
+
+  if (scadFiles.length === 1) {
+    await activateExternalSCAD(scadFiles[0]);
+  } else {
+    showSCADPicker(scadFiles, activateExternalSCAD);
+  }
+}
+
+async function writeExternalFile(dirHandle, filename, content) {
+  const fh = await dirHandle.getFileHandle(filename, { create: true });
+  const w  = await fh.createWritable();
+  await w.write(content);
+  await w.close();
+}
+
+async function activateExternalSCAD(name) {
+  watchScadName    = name;
+  watchJsonName    = name.replace(/\.scad$/i, '.json');
+  externalLastContent = '';
+
+  setWatchUI(true, name);
+  clearInterval(watchTimerId);
+
+  await refreshExternalSCAD(false);
+  await restoreAnnotationsFromExternal();
+
+  flashStatus('已关联文件夹。请让 AI Agent 读取 AI_CONTEXT.md');
+
+  watchTimerId = setInterval(async () => {
+    try {
+      const fh   = await externalDirHandle.getFileHandle(watchScadName);
+      const file = await fh.getFile();
+      const content = await file.text();
+      if (content !== externalLastContent) {
+        externalLastContent = content;
+        scadLastMod = file.lastModified / 1000;
+        renderScadPreview(watchScadName, content, scadLastMod);
+        await compileAndRender(content, true);
+      }
+    } catch {}
+  }, WATCH_MS);
+}
+
+async function refreshExternalSCAD(preserve) {
+  try {
+    const fh   = await externalDirHandle.getFileHandle(watchScadName);
+    const file = await fh.getFile();
+    const content = await file.text();
+    externalLastContent = content;
+    scadLastMod = file.lastModified / 1000;
+    renderScadPreview(watchScadName, content, scadLastMod);
+    await compileAndRender(content, preserve);
+  } catch (e) { setStatus('读取 SCAD 失败', '#e03030'); }
+}
+
+async function restoreAnnotationsFromExternal() {
+  try {
+    const fh   = await externalDirHandle.getFileHandle(watchJsonName);
+    const file = await fh.getFile();
+    applyAnnotationData(JSON.parse(await file.text()));
+  } catch { /* JSON 不存在，跳过 */ }
 }
 
 // SCAD 面板折叠按钮
@@ -1125,21 +1253,13 @@ document.getElementById('toggle-scad').addEventListener('click', () => {
 
 document.getElementById('watch-btn').addEventListener('click', startWatching);
 
-// ─── File Loading Handlers ─────────────────────────────────────────────────
-document.getElementById('file-input').addEventListener('change', e => {
-  stopWatching();
-  const file = e.target.files[0];
-  if (file) readFile(file, false);
-});
-
+// ─── STL drag-drop fallback (no button needed) ────────────────────────────
 function readFile(file, preserve = false) {
-  document.getElementById('status').textContent = `正在加载 ${file.name}...`;
+  setStatus(`正在加载 ${file.name}…`);
   const reader = new FileReader();
   reader.onload = ev => loadSTL(ev.target.result, preserve);
   reader.readAsArrayBuffer(file);
 }
-
-// Receive file from the plain-script drop handler via CustomEvent
 window.addEventListener('stl-file-dropped', e => { stopWatching(); readFile(e.detail.file, false); });
 
 // ─── Face Selection via Raycaster ──────────────────────────────────────────
@@ -1486,7 +1606,12 @@ function buildJSON() {
 }
 
 document.getElementById('btn-save').addEventListener('click', async () => {
-  if (VIA_SERVER && watchJsonName) {
+  if (workMode === 'external' && externalDirHandle && watchJsonName) {
+    try {
+      await writeExternalFile(externalDirHandle, watchJsonName, buildJSON());
+      flashStatus(`已保存 ${watchJsonName}`);
+    } catch (e) { console.error(e); flashStatus('保存失败'); }
+  } else if (VIA_SERVER && watchJsonName) {
     try {
       const resp = await fetch('/api/save-json', {
         method: 'POST',
@@ -1529,9 +1654,35 @@ function flashStatus(msg) {
   setTimeout(() => { el.textContent = prev; el.style.color = ''; }, 2000);
 }
 
+// ─── Mode modal buttons ───────────────────────────────────────────────────
+document.getElementById('btn-mode-project').addEventListener('click', startProjectMode);
+document.getElementById('btn-mode-external').addEventListener('click', startExternalMode);
+document.getElementById('btn-mode-cancel').addEventListener('click', () => {
+  document.getElementById('mode-modal').style.display = 'none';
+});
+
 // Start render loop after all state variables are declared
 animate();
 </script>
+<!-- 模式选择 Modal -->
+<div id="mode-modal" style="display:none;position:fixed;inset:0;background:rgba(31,32,36,0.35);backdrop-filter:blur(2px);z-index:999;align-items:center;justify-content:center;">
+  <div id="stl-picker-box" style="max-width:420px;">
+    <h3 style="font-size:14px;color:#1f2024;margin-bottom:4px;font-weight:600;">关联 OpenSCAD 项目</h3>
+    <p style="font-size:12px;color:#8b8f99;margin-bottom:14px;">选择工作方式</p>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
+      <button class="mode-option-btn" id="btn-mode-project">
+        <strong>在项目文件夹中运行</strong>
+        <span>跟踪本工具 model/ 目录中的 SCAD 文件（需要本地服务器）</span>
+      </button>
+      <button class="mode-option-btn" id="btn-mode-external">
+        <strong>在已有文件夹中运行</strong>
+        <span>选择你的 SCAD 项目文件夹，直接跟踪其中的文件并自动编译</span>
+      </button>
+    </div>
+    <button id="btn-mode-cancel" style="width:100%;background:#ffffff;border:1px solid #e5e6eb;color:#5b606b;padding:8px;border-radius:6px;cursor:pointer;font-size:12.5px;font-family:inherit;">取消</button>
+  </div>
+</div>
+
 <!-- SCAD 多文件选择 Modal -->
 <div id="stl-picker-modal">
   <div id="stl-picker-box">
