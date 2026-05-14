@@ -145,6 +145,20 @@ class Handler(SimpleHTTPRequestHandler):
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(content)
             self.send_json({'ok': True, 'saved': name})
+
+        # POST /api/save-scad  body: { filename, content }  →  写入 model/ 目录，浏览器自动检测并重新编译
+        elif parsed.path == '/api/save-scad':
+            length  = int(self.headers.get('Content-Length', 0))
+            body    = json.loads(self.rfile.read(length))
+            name    = os.path.basename(body.get('filename', ''))
+            content = body.get('content', '')
+            if not name or not name.endswith('.scad'):
+                self.send_json({'error': 'invalid filename'}, 400); return
+            path = os.path.join(MODEL_DIR, name)
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            self.send_json({'ok': True, 'saved': name})
+
         else:
             self.send_json({'error': 'not found'}, 404)
 

@@ -10,8 +10,10 @@
 本项目是一个 OpenSCAD 几何标注辅助工具。用户在浏览器中点选 3D 模型的面和边，添加标注后导出 JSON 文件。AI 读取 SCAD 源码 + JSON 标注，获得精确几何依据后再生成或修改代码。
 
 ```
-用户标注面/边 → 导出 JSON → AI 读取 SCAD + JSON → 生成准确代码
+用户标注面/边 → 导出 JSON → AI 读取 SCAD + JSON → 修改 SCAD → 保存至服务器 → 浏览器自动重新编译渲染
 ```
+
+> 浏览器每 2 秒轮询 SCAD 文件的修改时间。AI 调用 `POST /api/save-scad` 写入文件后，浏览器会在 2 秒内自动检测到变化并重新编译渲染，**无需用户手动操作**。
 
 ---
 
@@ -37,6 +39,58 @@ GET http://localhost:8080/api/json?file={模型名}.json
   告知用户先在浏览器 `http://localhost:8080/viewer/index.html` 完成标注并保存 JSON，再继续。
 
 **第四步：确认上下文已加载，列出已标注的面和边，然后等待用户指令。**
+
+---
+
+## 修改 SCAD 的完整流程
+
+### 第一步：生成修改后的完整 SCAD 内容
+
+基于读取到的源码进行修改，得到完整的新版 SCAD 字符串。
+
+### 第二步：通过 API 保存 SCAD 文件
+
+```
+POST http://localhost:8080/api/save-scad
+Content-Type: application/json
+
+{
+  "filename": "{模型名}.scad",
+  "content": "{完整的新版 SCAD 内容}"
+}
+```
+
+返回 `{"ok": true, "saved": "{模型名}.scad"}` 表示成功。
+
+保存后浏览器会在约 2 秒内自动重新编译并渲染新模型，**无需提示用户执行任何操作**。
+
+### 第三步：更新几何标注 JSON
+
+对照 SCAD 改动，逐一检查每个 face 和 edge 标注是否仍然有效：
+
+- **几何仍然存在** → 推算并更新 `click_point`、`normal`、`area_mm2`、`length_mm` 等数据，`status` 保持 `"valid"`
+- **几何已不存在或无法确定** → 保留原始数据，将 `status` 设为 `"invalid"`
+
+将修正后的完整 JSON 写回：
+
+```
+POST http://localhost:8080/api/save-json
+Content-Type: application/json
+
+{
+  "filename": "{模型名}.json",
+  "content": "{完整的更新后 JSON 字符串}"
+}
+```
+
+### 第四步：告知用户结果
+
+```
+已保存 {模型名}.scad，浏览器正在重新编译。
+标注更新：
+- face_001（顶面）：坐标已修正 ✓
+- edge_a（前边缘）：已失效，请在浏览器重新标注 ⚠
+```
 
 ---
 
@@ -74,20 +128,6 @@ Y 轴（↗）= 前后，正方向朝前（屏幕外）
 
 ---
 
-## 修改 SCAD 后的提示
-
-每次修改 SCAD 文件后，告知用户：
-
-```
-已修改 {模型名}.scad。
-浏览器检测到文件变化后会自动编译并重新渲染（约 2 秒轮询间隔）。
-无需手动运行任何命令。
-```
-
-> 注：SCAD 编译已在浏览器内完成（openscad-wasm），不需要本地安装 OpenSCAD，也不需要 build.sh 编译步骤。
-
----
-
 ## JSON 标注格式参考
 
 ```json
@@ -119,49 +159,12 @@ Y 轴（↗）= 前后，正方向朝前（屏幕外）
 }
 ```
 
----
-
-## 标注失效修正流程
-
-**每次修改 SCAD 几何形状后，AI 必须主动执行以下步骤，无需等待用户报告。**
-
-### 第一步：判断哪些标注受影响
-
-对照修改前后的 SCAD，逐一检查每个 face 和 edge 标注：
-
-- **几何仍然存在** → 更新 `click_point`、`normal`、`area_mm2`、`length_mm` 等坐标数据，`status` 保持 `"valid"`（或不填）
-- **几何已不存在或无法确定** → 保留原始数据，将 `status` 设为 `"invalid"`
-
-### 第二步：更新 JSON
-
-将修正后的完整 JSON 通过以下请求写回：
-
-```
-POST http://localhost:8080/api/save-json
-Content-Type: application/json
-
-{
-  "filename": "{模型名}.json",
-  "content": "{完整的更新后 JSON 字符串}"
-}
-```
-
-### 第三步：告知用户结果
-
-```
-已更新 {模型名}.json：
-- face_001（顶面）：坐标已修正 ✓
-- edge_a（前边缘）：已失效，请在浏览器重新标注 ⚠
-```
-
 ### status 字段说明
 
 ```json
 { "status": "valid" }    // 默认，标注有效（也可以不填此字段）
 { "status": "invalid" }  // 标注失效，浏览器将显示警告，用户需重新标注
 ```
-
-失效标注在浏览器中会显示 ⚠ 警告标识，用户删除后可重新点选。
 
 ---
 
@@ -170,6 +173,8 @@ Content-Type: application/json
 | 端点 | 方法 | 说明 |
 |---|---|---|
 | `/api/list-scad` | GET | 列出 model/ 目录中所有 .scad 文件 |
-| `/api/scad?file=x.scad` | GET | 读取 SCAD 源码 |
+| `/api/scad?file=x.scad` | GET | 读取 SCAD 源码 + mtime |
+| `/api/scad-mtime?file=x.scad` | GET | 仅返回 SCAD 修改时间戳 |
 | `/api/json?file=x.json` | GET | 读取标注 JSON |
+| `/api/save-scad` | POST | **写入 SCAD 文件（触发浏览器自动重编译）** |
 | `/api/save-json` | POST | 写入标注 JSON |
