@@ -921,20 +921,43 @@ function setStatus(msg, color = '') {
   el.style.color = color;
 }
 
-function compileScad(source) {
+function compileScad(source, deps = {}) {
   const fn = parseInt(document.getElementById('fn-select')?.value) || 32;
   return new Promise((resolve, reject) => {
     if (!workerReady) { reject(new Error('OpenSCAD 未就绪，请等待初始化')); return; }
     if (compilePending) compilePending.reject(new Error('cancelled'));
     compilePending = { resolve, reject };
-    worker.postMessage({ type: 'compile', source, fn });
+    worker.postMessage({ type: 'compile', source, fn, deps });
   });
+}
+
+async function collectDeps() {
+  const deps = {};
+  try {
+    if (workMode === 'external' && externalDirHandle) {
+      for await (const [name, handle] of externalDirHandle.entries()) {
+        if (handle.kind === 'file' && name.toLowerCase().endsWith('.scad') && name !== watchScadName) {
+          deps[name] = await handle.getFile().then(f => f.text());
+        }
+      }
+    } else if (workMode === 'project') {
+      const files = await fetch('/api/list-scad').then(r => r.json());
+      for (const name of files) {
+        if (name !== watchScadName) {
+          const resp = await fetch(`/api/scad?file=${encodeURIComponent(name)}`);
+          if (resp.ok) deps[name] = (await resp.json()).content;
+        }
+      }
+    }
+  } catch {}
+  return deps;
 }
 
 async function compileAndRender(source, preserve) {
   setStatus('编译中…', '#f08a3e');
   try {
-    const stlBuffer = await compileScad(source);
+    const deps = await collectDeps();
+    const stlBuffer = await compileScad(source, deps);
     loadSTL(stlBuffer, preserve);
     setStatus('编译完成 — ' + watchScadName);
   } catch (e) {

@@ -1,19 +1,13 @@
 /**
  * OpenSCAD WASM compilation worker.
  *
- * Problem: Emscripten's callMain() calls exit() internally, which terminates
- * the WASM runtime after the first use. Reusing the same instance causes
- * garbage exit codes on the second call.
+ * Multi-file support: data.deps is a { filename: content } map of all other
+ * .scad files in the same folder. They are written to the virtual FS root so
+ * that include <file.scad> / use <file.scad> directives resolve correctly.
  *
- * Fix: create a fresh OpenSCAD instance for each compilation. To avoid the
- * re-init wait, we immediately pre-warm the NEXT instance in the background
- * as soon as a compilation begins. openscad.js caches the downloaded WASM JS
- * text, so subsequent instantiations skip the network fetch and only re-run
- * WASM init from the browser-cached binary — typically < 2s.
- *
- * Fonts: openscad.fonts.js bundles all standard OpenSCAD fonts (~8 MB).
- * addFonts() writes them into the Emscripten virtual FS so that text()
- * calls render correctly.
+ * Instance recycling: callMain() calls exit() after each run, terminating the
+ * WASM runtime. We use a fresh instance per compilation and pre-warm the next
+ * one in the background so the re-init cost is hidden behind editing time.
  */
 import OpenSCAD   from '/wasm/openscad.js';
 import { addFonts } from '/wasm/openscad.fonts.js';
@@ -24,7 +18,6 @@ async function createInstance() {
   return sc;
 }
 
-// Always a Promise<instance> pointing to the next ready instance.
 let instanceReady = createInstance();
 
 instanceReady
@@ -42,14 +35,20 @@ self.onmessage = async ({ data }) => {
     return;
   }
 
-  // Pre-warm next instance in background while this compilation runs.
   instanceReady = createInstance();
 
   try {
+    // Write the main file
     try { sc.FS.unlink('/input.scad'); } catch {}
-    try { sc.FS.unlink('/output.stl'); } catch {}
-
     sc.FS.writeFile('/input.scad', data.source);
+
+    // Write all dependency files (include / use targets)
+    for (const [name, content] of Object.entries(data.deps || {})) {
+      try { sc.FS.unlink('/' + name); } catch {}
+      sc.FS.writeFile('/' + name, content);
+    }
+
+    try { sc.FS.unlink('/output.stl'); } catch {}
 
     const args = ['/input.scad', '--enable=manifold', '-o', '/output.stl'];
     if (data.fn) args.push('-D', `$fn=${data.fn}`);
