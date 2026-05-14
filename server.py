@@ -14,7 +14,7 @@ MODEL_DIR = os.path.join(BASE_DIR, 'model')
 WASM_DIR  = os.path.join(BASE_DIR, 'wasm')
 
 WASM_BASE  = 'https://github.com/openscad/openscad-wasm/releases/download/2022.03.20/'
-WASM_FILES = ['openscad.js', 'openscad.wasm.js', 'openscad.wasm']
+WASM_FILES = ['openscad.js', 'openscad.wasm.js', 'openscad.wasm', 'openscad.fonts.js']
 
 mimetypes.add_type('application/wasm',       '.wasm')
 mimetypes.add_type('application/javascript', '.js')

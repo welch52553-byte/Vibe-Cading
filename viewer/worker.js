@@ -8,13 +8,24 @@
  * Fix: create a fresh OpenSCAD instance for each compilation. To avoid the
  * re-init wait, we immediately pre-warm the NEXT instance in the background
  * as soon as a compilation begins. openscad.js caches the downloaded WASM JS
- * text, so subsequent instantiations only re-run WASM init from the
- * browser-cached binary — typically < 2s.
+ * text, so subsequent instantiations skip the network fetch and only re-run
+ * WASM init from the browser-cached binary — typically < 2s.
+ *
+ * Fonts: openscad.fonts.js bundles all standard OpenSCAD fonts (~8 MB).
+ * addFonts() writes them into the Emscripten virtual FS so that text()
+ * calls render correctly.
  */
-import OpenSCAD from '/wasm/openscad.js';
+import OpenSCAD   from '/wasm/openscad.js';
+import { addFonts } from '/wasm/openscad.fonts.js';
+
+async function createInstance() {
+  const sc = await OpenSCAD({ noInitialRun: true });
+  addFonts(sc);
+  return sc;
+}
 
 // Always a Promise<instance> pointing to the next ready instance.
-let instanceReady = OpenSCAD({ noInitialRun: true });
+let instanceReady = createInstance();
 
 instanceReady
   .then(() => self.postMessage({ type: 'ready' }))
@@ -32,7 +43,7 @@ self.onmessage = async ({ data }) => {
   }
 
   // Pre-warm next instance in background while this compilation runs.
-  instanceReady = OpenSCAD({ noInitialRun: true });
+  instanceReady = createInstance();
 
   try {
     try { sc.FS.unlink('/input.scad'); } catch {}
